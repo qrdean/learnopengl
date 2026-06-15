@@ -245,6 +245,7 @@ int main()
   glEnableVertexAttribArray(0);
 
   unsigned int diffuseMap = loadTexture("assets/container2.png");
+  unsigned int specularMap = loadTexture("assets/container2_specular.png");
 
   // Clear color prior to loop. if changing then we would add to loop
   glClearColor(0.1f, 0.1f, 0.1f, 0.1f);
@@ -262,6 +263,7 @@ int main()
   vec3 lightPos = {1.2f, 1.0f, 2.0f};
   glUseProgram(lightingS.ID);
   setInt(lightingS.ID, "material.diffuse", 0);
+  setInt(lightingS.ID, "material.specular", 1);
   // setVec3(lightingS.ID, "lightPos", lightPos);
 
   while (!glfwWindowShouldClose(window))
@@ -321,6 +323,10 @@ int main()
     // bind diffuse map
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, diffuseMap);
+
+    // bind specular map
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, specularMap);
 
     // render the cube
     glBindVertexArray(cubeVAO);
