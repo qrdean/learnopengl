@@ -7,6 +7,9 @@
 #include <mylib/shader_m.h>
 #include <stdio.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
@@ -15,6 +18,42 @@ float lastFrame = 0.0f;
 
 void processInput(GLFWwindow *window);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+
+unsigned int loadTexture(const char* filename)
+{
+  unsigned int textureId = 0;
+  glGenTextures(1, &textureId);
+
+  int width, height, nrChannels;
+  unsigned char *data = stbi_load(filename, &width, &height, &nrChannels, 0);
+  if (data) 
+  {
+    GLenum format;
+    if (nrChannels == 1)
+      format = GL_RED;
+    else if (nrChannels == 3)
+      format = GL_RGB;
+    else if (nrChannels == 4)
+      format = GL_RGBA;
+
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  }
+  else 
+  {
+    printf("failed to load texture\n");
+  }
+  stbi_image_free(data);
+
+  return textureId;
+}
+
 
 int main()
 {
@@ -93,48 +132,93 @@ int main()
   // };
   
   // 36 point cube verts with calculated normals
+  // float vertices[] = {
+  //   -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+  //    0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+  //    0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+  //    0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+  //   -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+  //   -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+  //
+  //   -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //    0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //    0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //    0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //   -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //   -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+  //
+  //   -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+  //   -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+  //   -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+  //   -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+  //   -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+  //   -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+  //
+  //    0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+  //    0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+  //    0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+  //    0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+  //    0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+  //    0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+  //
+  //   -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+  //    0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+  //    0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+  //    0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+  //   -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+  //   -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+  //
+  //   -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+  //    0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+  //    0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+  //    0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+  //   -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+  //   -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
+  // };
+
   float vertices[] = {
-    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-     0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-    -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+      // positions          // normals           // texture coords
+      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
+       0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
+       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
+      -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
+      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
 
-    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-    -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 0.0f,
+       0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 0.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 1.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   1.0f, 1.0f,
+      -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 1.0f,
+      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,   0.0f, 0.0f,
 
-    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+      -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+      -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
 
-     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
+       0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
+       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
+       0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
+       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
 
-    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-    -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+      -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
+       0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
+       0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+       0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
+      -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
+      -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
 
-    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-    -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
+      -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
+       0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
+      -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f,
+      -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f
   };
 
   unsigned int cubeVAO, VBO;
@@ -146,17 +230,21 @@ int main()
 
   glBindVertexArray(cubeVAO);
 
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
   glEnableVertexAttribArray(0);
-  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
   glEnableVertexAttribArray(1);
+  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+  glEnableVertexAttribArray(2);
   
   unsigned int lightCubeVAO;
   glGenVertexArrays(1, &lightCubeVAO);
   glBindVertexArray(lightCubeVAO);
 
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
   glEnableVertexAttribArray(0);
+
+  unsigned int diffuseMap = loadTexture("assets/container2.png");
 
   // Clear color prior to loop. if changing then we would add to loop
   glClearColor(0.1f, 0.1f, 0.1f, 0.1f);
@@ -172,7 +260,8 @@ int main()
   CreateCamera((vec3){0.5f, 0.0f, 5.0f});
 
   vec3 lightPos = {1.2f, 1.0f, 2.0f};
-  // glUseProgram(lightingS.ID);
+  glUseProgram(lightingS.ID);
+  setInt(lightingS.ID, "material.diffuse", 0);
   // setVec3(lightingS.ID, "lightPos", lightPos);
 
   while (!glfwWindowShouldClose(window))
@@ -186,14 +275,38 @@ int main()
     // input
     processInput(window);
 
+    // move the light
+    lightPos[0] = 1.0f + sin(glfwGetTime()) * 2.0f; // x
+    lightPos[1] = sin(glfwGetTime() / 2.0f) * 1.0f; // y
+
+    // vec3 lightColor;
+    // lightColor[0] = sin(glfwGetTime() * 2.0f);
+    // lightColor[1] = sin(glfwGetTime() * 0.7f);
+    // lightColor[2] = sin(glfwGetTime() * 1.3f);
+    //
+    // vec3 diffuseColor, ambientColor; 
+    // glm_vec3_mul(lightColor, (vec3){0.5f, 0.5f, 0.5f}, diffuseColor);
+    // glm_vec3_mul(diffuseColor, (vec3){0.5f, 0.5f, 0.5f}, ambientColor);
+
     // render
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    // Draw our objects
     glUseProgram(lightingS.ID);
     setVec3(lightingS.ID, "objectColor", (vec3){1.0f, 0.5f, 0.31f});
-    setVec3(lightingS.ID, "lightColor", (vec3){1.0f, 1.0f, 1.0f});
-    setVec3(lightingS.ID, "lightPos", lightPos);
+    setVec3(lightingS.ID, "light.ambient", (vec3){0.2f, 0.2f, 0.2f});
+    setVec3(lightingS.ID, "light.diffuse", (vec3){0.5f, 0.5f, 0.5f});
+    // setVec3(lightingS.ID, "light.ambient", ambientColor);
+    // setVec3(lightingS.ID, "light.diffuse", diffuseColor);
+    setVec3(lightingS.ID, "light.specular", (vec3){1.0f, 1.0f, 1.0f});
+    setVec3(lightingS.ID, "light.position", lightPos);
+    setVec3(lightingS.ID, "viewPos", Camera->Position);
+    setVec3(lightingS.ID, "material.ambient", (vec3){1.0f, 0.5f, 0.31f});
+    // setVec3(lightingS.ID, "material.diffuse", (vec3){1.0f, 0.5f, 0.31f});
+    setVec3(lightingS.ID, "material.specular", (vec3){0.5f, 0.5f, 0.5});
+    setFloat(lightingS.ID, "material.shininess", 32.0f);
 
+    // view/projection transformation
     mat4 projection = GLM_MAT4_IDENTITY_INIT;
     glm_perspective(glm_rad(Camera->Zoom), (float)SCR_WIDTH/(float)SCR_HEIGHT, 0.1f, 100.0f, projection);
     mat4 view = GLM_MAT4_IDENTITY_INIT;
@@ -201,12 +314,19 @@ int main()
     setMat4(lightingS.ID, "projection", projection);
     setMat4(lightingS.ID, "view", view);
 
+    // world transformation
     mat4 model = GLM_MAT4_IDENTITY_INIT;
     setMat4(lightingS.ID, "model", model);
 
+    // bind diffuse map
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, diffuseMap);
+
+    // render the cube
     glBindVertexArray(cubeVAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
 
+    // draw the lamp
     glUseProgram(lightCubeS.ID);
     setMat4(lightCubeS.ID, "projection", projection);
     setMat4(lightCubeS.ID, "view", view);
