@@ -3,6 +3,7 @@
 
 #include "cglm/cglm.h"
 #include "shader_m.h"
+#include <string.h>
 
 typedef struct Vertex {
   vec3 Position;
@@ -10,13 +11,19 @@ typedef struct Vertex {
   vec2 TexCoords;
 } Vertex;
 
-typedef enum { DIFFUSE, SPECULAR } TextureType;
+typedef enum { DIFFUSE, SPECULAR, NORMAL, NONE } TextureType;
 
 typedef struct Texture
 {
   unsigned int id;
   TextureType type;
 } Texture;
+
+typedef struct TextureDecode {
+  unsigned char *pixels;
+  int width, height, channels;
+  TextureType type;
+} TextureDecode;
 
 typedef struct Mesh
 {
@@ -33,6 +40,7 @@ Mesh createMesh(Vertex *vertices, unsigned short *indices, Texture *textures);
 void Draw(Mesh *m, struct Shader shader);
 void setupMesh(Mesh *m);
 char* GetTextureTypeChar(TextureType type);
+unsigned int SetupTexture(TextureDecode texture_decode);
 
 Mesh createMesh(Vertex *vertices, unsigned short *indices, Texture *textures){
   struct Mesh m = {0};
@@ -55,7 +63,7 @@ void setupMesh(Mesh *m)
   glBufferData(GL_ARRAY_BUFFER, m->numVertices * sizeof(Vertex), &m->vertices[0], GL_STATIC_DRAW);
 
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m->EBO);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, m->numIndices * sizeof(unsigned int), m->indices, GL_STATIC_DRAW);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, m->numIndices * sizeof(unsigned short), m->indices, GL_STATIC_DRAW);
 
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
@@ -93,7 +101,7 @@ void Draw(Mesh *m, struct Shader shader)
   }
 
   glBindVertexArray(m->VAO);
-  glDrawElements(GL_TRIANGLES, m->numIndices, GL_UNSIGNED_INT, 0);
+  glDrawElements(GL_TRIANGLES, m->numIndices, GL_UNSIGNED_SHORT, 0);
   glBindVertexArray(0);
 
   glActiveTexture(GL_TEXTURE0);
@@ -106,4 +114,47 @@ char* GetTextureTypeChar(TextureType type) {
     return "specular";
   return "";
 }
+
+TextureType GetTextureTypeFromChar(const char* name)
+{
+  if (strcmp(name, "specular")) {
+    return SPECULAR;
+  } else if (strcmp(name, "diffuse")) {
+    return DIFFUSE;
+  } else if (strcmp(name, "normal")) {
+    return NORMAL;
+  }
+  return NONE;
+}              
+
+
+unsigned int SetupTexture(TextureDecode texture_decode) 
+{
+  unsigned int textureID;
+  glGenTextures(1, &textureID);
+  if (texture_decode.pixels)  
+  {
+    GLenum format;
+    if (texture_decode.channels == 1)
+      format = GL_RED;
+    else if (texture_decode.channels == 3)
+      format = GL_RGB;
+    else if (texture_decode.channels == 4) 
+      format = GL_RGBA;
+    
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, format, texture_decode.width, texture_decode.height, 0, format, GL_UNSIGNED_BYTE, texture_decode.pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_LINEAR);
+
+    free(texture_decode.pixels);
+  }
+
+  return textureID;
+}
+
 #endif

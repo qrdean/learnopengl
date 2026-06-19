@@ -1,6 +1,7 @@
 #ifndef MODEL_H
 #define MODEL_H
 
+#include "stb_image.h"
 #include "mesh.h"
 #include "cgltf.h"
 #include <stddef.h>
@@ -115,8 +116,93 @@ Model loadModel(const char* filename)
       cgltf_mesh *mesh = node->mesh;
       if (!mesh) continue;
 
+      // materials
+      int material_count = (int)data->materials_count;
+      int images_count = (int)data->images_count;
+      printf(" > materials count: %i\n", material_count);
+      printf(" > images count: %i\n", images_count);
+      TextureDecode decoded_textures[images_count];
+
+      char *loaded_images[images_count];
+      for (uint32_t m = 0; m < images_count; m++) {
+        printf("raw image: %s\n", data->images[m].name);
+        printf("uri image: %s\n", data->images[m].uri);
+        TextureDecode decoded_texture = {0};
+
+
+        if (data->images[m].buffer_view) {
+          uint8_t *dd = (uint8_t*)data->images[m].buffer_view->buffer->data + data->images[m].buffer_view->offset;
+          decoded_texture.pixels = stbi_load_from_memory(dd, (int)data->images[m].buffer_view->size, &decoded_texture.width, &decoded_texture.height, &decoded_texture.channels, 0);
+        } else if(data->images[m].uri){
+          int skip = 0;
+          for(uint32_t ll = 0; ll < images_count; ll++)
+          {
+            if (loaded_images[images_count] != NULL) {
+              if (strcmp(loaded_images[images_count], data->images[m].uri)) {
+                skip = 1;
+                break;
+              }
+            } else {
+              loaded_images[images_count] = data->images[m].uri;
+              break;
+            } 
+          }
+
+          if (!skip) {
+            uint8_t *dd = (uint8_t*)data->images[m].buffer_view->buffer->data + data->images[m].buffer_view->offset;
+            char full_path[512];
+            snprintf(full_path, sizeof(full_path), "assets/%s", data->images[m].uri);
+            decoded_texture.pixels = stbi_load(full_path, &decoded_texture.width, &decoded_texture.height, &decoded_texture.channels, 0);
+          }
+        }
+
+        decoded_textures[m] = decoded_texture;
+        // printf("loaded: %s\n", x_loaded);
+        // image_p = data->images[m].uri;
+      }
+
+      model.meshes[meshIndex].numTextures = images_count;
+      Texture *textures = calloc(images_count, sizeof(Texture));
+      for (unsigned int tt = 0; tt < images_count; tt++)
+      {
+        unsigned int textureId = SetupTexture(decoded_textures[tt]);
+        Texture tex = {0};
+        tex.type = decoded_textures[tt].type;
+        tex.id = textureId;
+        textures[tt] = tex;
+      }
+      model.meshes[meshIndex].textures = textures;
+
+      // for (uint32_t m = 0; m < material_count; m++)
+      // {
+      //   if (data->materials[m].has_pbr_metallic_roughness) {
+      //     cgltf_image *image = data->materials[m].pbr_metallic_roughness.base_color_texture.texture->image;
+      //     printf("pbr metallic roughness: images [%s]\n", image->uri);
+      //   }
+      //
+      //   if (data->materials[m].has_pbr_specular_glossiness) {
+      //     cgltf_image *specimage = data->materials[m].pbr_specular_glossiness.specular_glossiness_texture.texture->image;
+      //     cgltf_image *diffimage = data->materials[m].pbr_specular_glossiness.diffuse_texture.texture->image;
+      //     printf("pbrspec: images [%s]\n", specimage->uri);
+      //     printf("pbrdiff: images [%s]\n", diffimage->uri);
+      //   }
+      //
+      //   if (data->materials[m].has_pbr_metallic_roughness) {
+      //   }
+      //   if (data->materials[m].has_diffuse_transmission) {
+      //     cgltf_image *image = data->materials[m].diffuse_transmission.diffuse_transmission_texture.texture->image;
+      //     printf("diffuse: images [%s]\n", image->uri);
+      //   }
+      //
+      //   if (data->materials[m].has_specular) {
+      //     cgltf_image *image = data->materials[m].specular.specular_texture.texture->image;
+      //     printf("specular: image [%s]\n", image->uri);
+      //   }
+      // }
+
       for (uint32_t p = 0; p < mesh->primitives_count; p++)
       {
+        if (mesh->primitives[p].type != cgltf_primitive_type_triangles) continue;
         // setup indices
         if (mesh->primitives[p].indices != NULL)
         {
@@ -132,13 +218,13 @@ Model loadModel(const char* filename)
             break;
           }
 
-          // for (uint32_t i = 0; i < index_accessor->count; i++)
-          // {
-          //   indices[i] = index_buff[i];
-          // }
           model.meshes[meshIndex].numIndices = index_count;
+          // for (uint32_t i = 0; i < index_count; i++)
+          // {
+          //   model.meshes[meshIndex].indices[i] = index_buff[i];
+          // }
           model.meshes[meshIndex].indices = index_buff;
-          free(index_buff);
+          // free(index_buff);
         }
 
         cgltf_accessor *pos_accessor = NULL;
@@ -256,8 +342,8 @@ Model loadModel(const char* filename)
         model.meshes[meshIndex].vertices = tempVert;
         setupMesh(&model.meshes[meshIndex]);
         free(tempVert);
+        meshIndex++;
       }
-      meshIndex++;
       // free(indices);
 
       // for (unsigned int p = 0; p < mesh->primitives_count; p++)

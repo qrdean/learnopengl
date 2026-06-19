@@ -114,7 +114,8 @@ int main()
   struct Shader shader = createShader("shaders/colors_vert.vs", "shaders/colors_frag.fs");
   // struct Shader lightCubeS = createShader("shaders/light_cube_vert.vs", "shaders/light_cube_frag.fs");
   // Model ourModel = loadModel("assets/test_cube.glb");
-  Model ourModel = loadModel("assets/test_backpack.glb");
+  // Model ourModel = loadModel("assets/test_backpack.gltf");
+  Model ourModel = loadModel("assets/test_cube.gltf");
 
   // Clear color prior to loop. if changing then we would add to loop
   glClearColor(0.1f, 0.1f, 0.1f, 0.1f);
