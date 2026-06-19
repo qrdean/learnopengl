@@ -96,8 +96,9 @@ void Draw(Mesh *m, struct Shader shader)
     }
 
     char materialUniformName[256];
-    sprintf(materialUniformName, "material.%s%i", GetTextureTypeChar(type), number);
+    snprintf(materialUniformName, sizeof(materialUniformName), "%s%i", GetTextureTypeChar(type), number);
     setInt(shader.ID, materialUniformName, i);
+    glBindTexture(GL_TEXTURE_2D, m->textures[i].id);
   }
 
   glBindVertexArray(m->VAO);
@@ -109,19 +110,25 @@ void Draw(Mesh *m, struct Shader shader)
 
 char* GetTextureTypeChar(TextureType type) {
   if (type == DIFFUSE) {
-    return "diffuse";
-  } else if (type == SPECULAR)
-    return "specular";
+    return "texture_diffuse";
+  } else if (type == SPECULAR) {
+    return "texture_specular";
+  } else if (type == NORMAL) {
+    return "texture_normal";
+  }
   return "";
 }
 
 TextureType GetTextureTypeFromChar(const char* name)
 {
-  if (strcmp(name, "specular")) {
+  if (strcmp(name, "specular") == 0) {
+    printf("loading spec\n");
     return SPECULAR;
-  } else if (strcmp(name, "diffuse")) {
+  } else if (strcmp(name, "diffuse") == 0) {
+    printf("loading diffuse\n");
     return DIFFUSE;
-  } else if (strcmp(name, "normal")) {
+  } else if (strcmp(name, "normal") == 0) {
+    printf("loading norm\n");
     return NORMAL;
   }
   return NONE;

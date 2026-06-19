@@ -19,6 +19,12 @@ void modelDraw(Model m, struct Shader shader);
 // Texture loadMaterialTextures(aiMaterial *mat, aiTextureType type, const char* typeName)
 // {}
 //
+//
+
+static Texture* texture_cache = NULL;
+static uint32_t num_cached_textures = 0;
+static uint32_t size_cached_textures = 0;
+
 #define LOAD_ATTRIBUTE(accesor, numComp, srcType, dstPtr) \
 { \
   int n = 0; \
@@ -86,8 +92,8 @@ Model loadModel(const char* filename)
     printf("num mesh %i\n", primitives_count);
     // printf("sizeof %lu\n", sizeof(model.meshes));
 
-    Vertex vertices = {0};
-    model.meshes->vertices = &vertices;
+    // Vertex vertices = {0};
+    // model.meshes->vertices = &vertices;
 
     // data->meshes_count
     //
@@ -108,6 +114,13 @@ Model loadModel(const char* filename)
     // }
 
     // Loading Mesh data
+    for (unsigned int i = 0; i < data->nodes_count; i++) {
+      uint32_t images_count = (uint32_t)data->images_count;
+      for (uint32_t m = 0; m < images_count; m++) {
+        if(data->images[m].uri != NULL) {
+        }   
+      }
+    }
 
     int meshIndex = 0;
     for (unsigned int i = 0; i < data->nodes_count; i++)
@@ -117,45 +130,55 @@ Model loadModel(const char* filename)
       if (!mesh) continue;
 
       // materials
-      int material_count = (int)data->materials_count;
-      int images_count = (int)data->images_count;
-      printf(" > materials count: %i\n", material_count);
-      printf(" > images count: %i\n", images_count);
+      uint32_t material_count = (uint32_t)data->materials_count;
+      uint32_t images_count = (uint32_t)data->images_count;
+      // printf(" > materials count: %i\n", material_count);
+      // printf(" > images count: %i\n", images_count);
       TextureDecode decoded_textures[images_count];
 
-      char *loaded_images[images_count];
+      const char *loaded_images[images_count];
       for (uint32_t m = 0; m < images_count; m++) {
-        printf("raw image: %s\n", data->images[m].name);
-        printf("uri image: %s\n", data->images[m].uri);
+        loaded_images[m] = NULL;
+      }
+      for (uint32_t m = 0; m < images_count; m++) {
+        // printf("raw image: %s\n", data->images[m].name);
+        // printf("uri image: %s\n", data->images[m].uri);
         TextureDecode decoded_texture = {0};
 
 
-        if (data->images[m].buffer_view) {
+        if (data->images[m].buffer_view != NULL) {
+          printf("data buffer view");
           uint8_t *dd = (uint8_t*)data->images[m].buffer_view->buffer->data + data->images[m].buffer_view->offset;
           decoded_texture.pixels = stbi_load_from_memory(dd, (int)data->images[m].buffer_view->size, &decoded_texture.width, &decoded_texture.height, &decoded_texture.channels, 0);
-        } else if(data->images[m].uri){
+        } else if(data->images[m].uri != NULL) {
+          printf("uri %s\n", data->images[m].uri);
           int skip = 0;
           for(uint32_t ll = 0; ll < images_count; ll++)
           {
-            if (loaded_images[images_count] != NULL) {
-              if (strcmp(loaded_images[images_count], data->images[m].uri)) {
+            // printf("%s\n", loaded_images[ll]);
+            if (loaded_images[ll] != NULL) {
+              printf("%s ==? %s\n", loaded_images[ll], data->images[m].uri);
+              if (strcmp(loaded_images[ll], data->images[m].uri) == 0) {
                 skip = 1;
                 break;
               }
             } else {
-              loaded_images[images_count] = data->images[m].uri;
+              printf("loading %s\n", data->images[m].uri);
+              loaded_images[ll] = data->images[m].uri;
               break;
             } 
           }
-
+          printf("skip?\n");
           if (!skip) {
-            uint8_t *dd = (uint8_t*)data->images[m].buffer_view->buffer->data + data->images[m].buffer_view->offset;
             char full_path[512];
-            snprintf(full_path, sizeof(full_path), "assets/%s", data->images[m].uri);
+            int length = snprintf(full_path, sizeof(full_path), "assets/%s", data->images[m].uri);
+            printf("[%s] fullpath is %i long\n", full_path, length);
             decoded_texture.pixels = stbi_load(full_path, &decoded_texture.width, &decoded_texture.height, &decoded_texture.channels, 0);
           }
         }
-
+        const char *texture_type_name = data->images[m].name;
+        decoded_texture.type = GetTextureTypeFromChar(texture_type_name);
+        printf("image name %s | loading into [%u] | for meshnumber [%i]\n",data->images[m].name, decoded_texture.type, meshIndex);
         decoded_textures[m] = decoded_texture;
         // printf("loaded: %s\n", x_loaded);
         // image_p = data->images[m].uri;
@@ -320,6 +343,9 @@ Model loadModel(const char* filename)
         {
           if (texcoords_accessor->type == cgltf_type_vec2)
           {
+            // if (texcoords_accessor->component_type == cgltf_component_type_r_32f) printf("comp type 32f\n");
+            // if (texcoords_accessor->component_type == cgltf_component_type_r_8u) printf("comp type 8u\n");
+            // if (texcoords_accessor->component_type == cgltf_component_type_r_16u) printf("comp type 16u\n");
             uint32_t texcoord_count = (uint32_t)texcoords_accessor->count;
             float *texcoords = malloc(texcoord_count*2*sizeof(float));
             cgltf_size texcoords_unpacked = cgltf_accessor_unpack_floats(texcoords_accessor, texcoords, texcoord_count * 2);
@@ -344,107 +370,6 @@ Model loadModel(const char* filename)
         free(tempVert);
         meshIndex++;
       }
-      // free(indices);
-
-      // for (unsigned int p = 0; p < mesh->primitives_count; p++)
-      // {
-      //   Vertex *vertices = (Vertex*)calloc(mesh->primitives_count, sizeof(Vertex));
-      //   if (mesh->primitives[p].type != cgltf_primitive_type_triangles) continue;
-      //   for (unsigned int j = 0; j < mesh->primitives[p].attributes_count; j++)
-      //   {
-      //     if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_position)
-      //     {
-      //       printf("loading positions\n");
-      //       cgltf_accessor *attribute = mesh->primitives[p].attributes[j].data;
-      //       if (model.meshes[meshIndex].vertices != NULL) printf("vertices attribute data alreadyloaded\n");
-      //       else
-      //       {
-      //         model.meshes[meshIndex].numVertices = (int)attribute->count;
-      //         float *tempVert = (float *)malloc(attribute->count*3*sizeof(float));
-      //         LOAD_ATTRIBUTE(attribute, 3, float, tempVert); 
-      //
-      //         // Vertex *vertices = model.meshes[meshIndex].vertices;
-      //         Vertex *vertices = (Vertex *)calloc(attribute->count, sizeof(Vertex));
-      //         for (unsigned int k = 0; k < attribute->count; k++)
-      //         {
-      //           vec3 vt = {tempVert[3*k], tempVert[3*k+1], tempVert[3*k+2]};
-      //           vertices->Position[3*k] = vt[0];  
-      //           vertices->Position[3*k+1] = vt[1];  
-      //           vertices->Position[3*k+2] = vt[2];  
-      //         }
-      //         model.meshes[meshIndex].vertices = vertices;
-      //         free(tempVert);
-      //         free(vertices);
-      //       }
-      //     }
-      //     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_normal) 
-      //     {
-      //       printf("loading normals\n");
-      //       cgltf_accessor *attribute = mesh->primitives[p].attributes[j].data;
-      //       // model.meshes[meshIndex].numVertices = (int)attribute->count;
-      //       float *tempNorm = (float *)malloc(attribute->count*3*sizeof(float));
-      //       LOAD_ATTRIBUTE(attribute, 3, float, tempNorm); 
-      //
-      //       Vertex *vertices = model.meshes[meshIndex].vertices;
-      //       for (unsigned int k = 0; k < attribute->count; k++)
-      //       {
-      //         vec3 nt = {tempNorm[3*k], tempNorm[3*k+i], tempNorm[3*k+2]};
-      //         vertices->Normal[0] = nt[0];  
-      //         vertices->Normal[1] = nt[1];  
-      //         vertices->Normal[2] = nt[2];  
-      //       }
-      //       free(tempNorm);
-      //     }
-      //     else if (mesh->primitives[p].attributes[j].type == cgltf_attribute_type_texcoord) 
-      //     {
-      //       cgltf_accessor *attribute = mesh->primitives[p].attributes[j].data;
-      //       // model.meshes[meshIndex].numVertices = (int)attribute->count;
-      //       if (attribute->type == cgltf_type_vec2)
-      //       {
-      //         printf("loading textures\n");
-      //         float *texcoordPtr = (float *)malloc(attribute->count*2*sizeof(float));
-      //         LOAD_ATTRIBUTE(attribute, 2, float, texcoordPtr); 
-      //
-      //         Vertex *vertices = model.meshes[meshIndex].vertices;
-      //         for (unsigned int k = 0; k < attribute->count; k++)
-      //         {
-      //           vec2 tc = {texcoordPtr[2*k], texcoordPtr[2*k+i]};
-      //           vertices->TexCoords[0] = tc[0];  
-      //           vertices->TexCoords[1] = tc[1];  
-      //         }
-      //         free(texcoordPtr);
-      //       } else {
-      //         Vertex *vertices = model.meshes[meshIndex].vertices;
-      //         vertices->TexCoords[0] = 0.0f;
-      //         vertices->TexCoords[1] = 0.0f;
-      //       }
-      //     } 
-      //     // attribute->buffer_view->buffer->data;
-      //
-      //     // vec3{attribute-}
-      //     // model.meshes[meshIndex].vertices = (float *)malloc(attribute->count*3*sizeof(float));
-      //   }
-      //
-      //   if (mesh->primitives[p].indices->buffer_view != NULL)
-      //   {
-      //     cgltf_accessor *attribute = mesh->primitives[p].indices;
-      //
-      //     model.meshes[meshIndex].numIndices = (int)attribute->count/3;
-      //
-      //     model.meshes[meshIndex].indices = (unsigned int *)malloc(attribute->count*sizeof(unsigned int *));
-      //     LOAD_ATTRIBUTE(attribute, i , unsigned int, model.meshes[meshIndex].indices);
-      //   }
-      //
-      //
-      //   // for (unsigned int m = 0; data->materials; m++)
-      //   // {
-      //   //   if (&data->materials[m] == mesh->primitives[p].material)
-      //   //   {
-      //   //     break;
-      //   //   }
-      //   // }
-      //   meshIndex++;
-      // }
     }
 
     cgltf_free(data);
