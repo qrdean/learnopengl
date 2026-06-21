@@ -23,65 +23,10 @@ float lastFrame = 0.0f;
 void processInput(GLFWwindow *window);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-// void load_this_mesh(const char* filename)
-// {
-//   int filesize = 0;
-//   unsigned char *fileData = LoadFileData(filename, &filesize);
-//
-//   cgltf_options options = {0};
-//   cgltf_data* data = NULL;
-//   cgltf_result result = cgltf_parse(&options, fileData, filesize, &data);
-//   if (result == cgltf_result_success)
-//   {
-//     printf("data loaded success %s", filename);
-//     cgltf_free(data);
-//   }
-//   else 
-//   {
-//     printf("\ndid not load from %s\n", filename);
-//   }
-// }
-
 void pprint_vec3(vec3 v, const char* msg) 
 {
   printf("\n[%s] vector: \n[%f %f %f]\n", msg, v[0], v[1], v[2]);
 }
-
-unsigned int loadTexture(const char* filename)
-{
-  unsigned int textureId = 0;
-  glGenTextures(1, &textureId);
-
-  int width, height, nrChannels;
-  unsigned char *data = stbi_load(filename, &width, &height, &nrChannels, 0);
-  if (data) 
-  {
-    GLenum format;
-    if (nrChannels == 1)
-      format = GL_RED;
-    else if (nrChannels == 3)
-      format = GL_RGB;
-    else if (nrChannels == 4)
-      format = GL_RGBA;
-
-    glBindTexture(GL_TEXTURE_2D, textureId);
-    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  }
-  else 
-  {
-    printf("failed to load texture\n");
-  }
-  stbi_image_free(data);
-
-  return textureId;
-}
-
 
 int main()
 {

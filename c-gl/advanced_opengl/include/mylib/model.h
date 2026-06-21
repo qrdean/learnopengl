@@ -13,7 +13,7 @@ typedef struct Model {
 } Model;
 
 Model loadModel(const char *path);
-void modelDraw(Model m, struct Shader shader);
+void modelDraw(Model m, Shader shader);
 
 static Texture* texture_cache = NULL;
 static uint32_t num_cached_textures = 0;
@@ -33,7 +33,7 @@ static uint32_t size_cached_textures = 0;
   } \
 }
 
-void modelDraw(Model m, struct Shader shader)
+void modelDraw(Model m, Shader shader)
 {
   for(unsigned int i = 0; i < m.numMeshes; i++)
   {
