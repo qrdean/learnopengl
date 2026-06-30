@@ -1,4 +1,5 @@
-#include <glad/glad.h>
+// #include <glad/glad.h>
+#include "glad.c"
 #include <GLFW/glfw3.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -46,7 +47,11 @@ int main()
 
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_LESS);
+  glEnable(GL_STENCIL_TEST);
+  glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
   Shader shader = createShader("shaders/depth_test.vs", "shaders/depth_test.fs");
+  Shader colorShader = createShader("shaders/depth_test.vs", "shaders/stencil_shader.fs");
 
   float cubeVertices[] = {
       // positions          // texture Coords
@@ -142,7 +147,7 @@ int main()
   CreateCamera((vec3){0.5f, 0.0f, 5.0f});
 
   glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   while(!glfwWindowShouldClose(window))
   {
@@ -153,31 +158,24 @@ int main()
     process_input(window);
 
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    // glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+
+    glUseProgram(colorShader.ID);
+    // RenderCamera(shader, Camera);
+    mat4 model = GLM_MAT4_IDENTITY_INIT;
+    mat4 projection = GLM_MAT4_IDENTITY_INIT;
+    mat4 view = GLM_MAT4_IDENTITY_INIT;
+    Camera_GetViewMatrix(view);
+    glm_perspective(glm_rad(Camera->Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f, projection);
+    setMat4(colorShader.ID, "view", view);
+    setMat4(colorShader.ID, "projection", projection);
 
     glUseProgram(shader.ID);
-    // RenderCamera(shader, Camera);
-    mat4 projection = GLM_MAT4_ZERO_INIT;
-    glm_perspective(glm_rad(Camera->Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f, projection);
-    mat4 view = GLM_MAT4_ZERO_INIT;
-    Camera_GetViewMatrix(view);
-    setMat4(shader.ID, "projection", projection);
     setMat4(shader.ID, "view", view);
+    setMat4(shader.ID, "projection", projection);
 
-    mat4 model = GLM_MAT4_IDENTITY_INIT;
-    // bind vertex for cubes
-    glBindVertexArray(cube.VAO);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, cube_texture);
-    // cube 1
-    glm_translate(model, (vec3){-1.0f, 0.0f, -1.0f});
-    setMat4(shader.ID, "model", model);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-    // cube 2
-    glm_mat4_identity(model);
-    glm_translate(model, (vec3){2.0f, 0.0f, 0.0f});
-    setMat4(shader.ID, "model", model);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glStencilMask(0x00);
 
     // floor
     glBindVertexArray(plane.VAO);
@@ -185,7 +183,49 @@ int main()
     glm_mat4_identity(model);
     setMat4(shader.ID, "model", model);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+
+    glStencilFunc(GL_ALWAYS, 1, 0xFF);
+    glStencilMask(0xFF);
+    // pass 1
+    glBindVertexArray(cube.VAO);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, cube_texture);
+    glm_translate(model, (vec3){-1.0f, 0.0f, -1.0f});
+    setMat4(shader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glm_mat4_identity(model);
+    glm_translate(model, (vec3){2.0f, 0.0f, 0.0f});
+    setMat4(shader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+                          
+    glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
+    glStencilMask(0x00);
+    glDisable(GL_DEPTH_TEST);
+    glUseProgram(colorShader.ID);
+    float scale = 1.1f;
+
+    // bind vertex for cubes
+    glBindVertexArray(cube.VAO);
+    // glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, cube_texture);
+    glm_mat4_identity(model);
+    // cube 1
+    glm_translate(model, (vec3){-1.0f, 0.0f, -1.0f});
+    glm_scale(model, (vec3){scale, scale, scale});
+    setMat4(colorShader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    // cube 2
+    glm_mat4_identity(model);
+    glm_translate(model, (vec3){2.0f, 0.0f, 0.0f});
+    glm_scale(model, (vec3){scale, scale, scale});
+    setMat4(colorShader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);// unbind
+                         
+    glStencilMask(0xFF);
+    glStencilFunc(GL_ALWAYS, 0, 0xFF);
+    glEnable(GL_DEPTH_TEST);
 
     glfwSwapBuffers(window);
     glfwPollEvents();

@@ -1,7 +1,10 @@
-CFLAGS = -Wall -Wextra -Iinclude $(shell pkg-config --cflags glfw3) -g
+CFLAGS = -std=c99 -Wall -Wextra -Iinclude $(shell pkg-config --cflags glfw3) -g
 LDFLAGS = $(shell pkg-config --libs glfw3) -ldl -lm -g
 
-main: src/main.c src/glad.c
+main: src/main.c
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+testbuild: src/example.c src/glad.c
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 .PHONY: clean compile_flags.txt
