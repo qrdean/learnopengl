@@ -1,5 +1,6 @@
 // #include <glad/glad.h>
-#include "glad.c"
+// #include "glad.c"
+#include "renderer.c"
 #include <GLFW/glfw3.h>
 #include <stdlib.h>
 
@@ -65,6 +66,7 @@ int main()
   // glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
   Shader shader = createShader("shaders/depth_test.vs", "shaders/depth_test.fs");
   Shader colorShader = createShader("shaders/depth_test.vs", "shaders/stencil_shader.fs");
+  Shader framebufferShader = createShader("shaders/framebuffer_test.vs", "shaders/framebuffer_test.fs");
 
   float cubeVertices[] = {
       // positions          // texture Coords
@@ -141,6 +143,17 @@ int main()
     {0.5f, 0.0f, -0.6f},
   };
 
+  float quadVertices[] = {
+    // positions   // texCoords
+    -1.0f,  1.0f,  0.0f, 1.0f,
+    -1.0f, -1.0f,  0.0f, 0.0f,
+     1.0f, -1.0f,  1.0f, 0.0f,
+
+    -1.0f,  1.0f,  0.0f, 1.0f,
+     1.0f, -1.0f,  1.0f, 0.0f,
+     1.0f,  1.0f,  1.0f, 1.0f
+  };	
+
   PositionFromCamera vegetation_position_structs[] = {
     {{vegetation_positions[0][0], vegetation_positions[0][1], vegetation_positions[0][2]}, 0.0f},
     {{vegetation_positions[1][0], vegetation_positions[1][1], vegetation_positions[1][2]}, 0.0f},
@@ -189,15 +202,61 @@ int main()
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, vert_size * sizeof(float), (void*)(3 * sizeof(float)));
   glBindVertexArray(0);
 
+  vertex_holder quad;
+  glGenVertexArrays(1, &quad.VAO);
+  glGenBuffers(1, &quad.VBO);
+  glBindVertexArray(quad.VAO);
+  glBindBuffer(GL_ARRAY_BUFFER, quad.VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+  glEnableVertexAttribArray(1);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+
   uint32_t cube_texture = load_texture("assets/marble.jpg");
   uint32_t floor_texture = load_texture("assets/metal.png");
   uint32_t grass_texture = load_texture("assets/grass.png");
   uint32_t glass_texture = load_texture("assets/blending_transparent_window.png");
+  uint32_t container_texture = load_texture("assets/container.jpg");
 
 
   // load textures need to get
   glUseProgram(shader.ID);
   setInt(shader.ID, "texture1", 0);
+
+  glUseProgram(framebufferShader.ID);
+  setInt(framebufferShader.ID, "screenTexture", 0);
+
+  uint32_t fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+  uint32_t fbo_texture;
+  glGenTextures(1, &fbo_texture);
+  glBindTexture(GL_TEXTURE_2D, fbo_texture);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 800, 600, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  // attach texture to framebuffer
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fbo_texture, 0);
+
+  uint32_t rbo;
+  glGenRenderbuffers(1, &rbo);
+  glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 800, 600);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+  // attach
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
+
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) 
+  {
+    // glGetError();
+    printf("[OPENGL_ERROR]: FrameBuffer %i could not be completed\n", fbo);
+  } else {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
 
   CreateCamera((vec3){0.5f, 0.0f, 5.0f});
 
@@ -219,11 +278,14 @@ int main()
       sort_position_cam(vegetation_position_structs, 5);
     }
 
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glEnable(GL_DEPTH_TEST);
+    
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     // glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
-    glUseProgram(colorShader.ID);
+    glUseProgram(shader.ID);
     // RenderCamera(shader, Camera);
     mat4 model = GLM_MAT4_IDENTITY_INIT;
     mat4 projection = GLM_MAT4_IDENTITY_INIT;
@@ -233,9 +295,9 @@ int main()
     setMat4(colorShader.ID, "view", view);
     setMat4(colorShader.ID, "projection", projection);
 
-    glUseProgram(shader.ID);
-    setMat4(shader.ID, "view", view);
-    setMat4(shader.ID, "projection", projection);
+    // glUseProgram(shader.ID);
+    // setMat4(shader.ID, "view", view);
+    // setMat4(shader.ID, "projection", projection);
 
     // glStencilMask(0x00);
     //
@@ -247,29 +309,41 @@ int main()
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
 
-    glBindVertexArray(vegetation.VAO);
-    glBindTexture(GL_TEXTURE_2D, glass_texture);
-    for(uint32_t i = 0; i < 5; i++) {
-      glm_mat4_identity(model);
-      glm_translate(model, vegetation_position_structs[i].position);
-      setMat4(shader.ID, "model", model);    
-      glDrawArrays(GL_TRIANGLES, 0, 6);
-    }
-    glBindVertexArray(0);
+    // glBindVertexArray(vegetation.VAO);
+    // glBindTexture(GL_TEXTURE_2D, glass_texture);
+    // for(uint32_t i = 0; i < 5; i++) {
+    //   glm_mat4_identity(model);
+    //   glm_translate(model, vegetation_position_structs[i].position);
+    //   setMat4(shader.ID, "model", model);    
+    //   glDrawArrays(GL_TRIANGLES, 0, 6);
+    // }
+    // glBindVertexArray(0);
     //
     // glStencilFunc(GL_ALWAYS, 1, 0xFF);
     // glStencilMask(0xFF);
     // // pass 1
-    // glBindVertexArray(cube.VAO);
-    // glActiveTexture(GL_TEXTURE0);
-    // glBindTexture(GL_TEXTURE_2D, cube_texture);
-    // glm_translate(model, (vec3){-1.0f, 0.0f, -1.0f});
-    // setMat4(shader.ID, "model", model);
-    // glDrawArrays(GL_TRIANGLES, 0, 36);
-    // glm_mat4_identity(model);
-    // glm_translate(model, (vec3){2.0f, 0.0f, 0.0f});
-    // setMat4(shader.ID, "model", model);
-    // glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(cube.VAO);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, container_texture);
+    glm_translate(model, (vec3){-1.0f, 0.0f, -1.0f});
+    setMat4(shader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glm_mat4_identity(model);
+    glm_translate(model, (vec3){2.0f, 0.0f, 0.0f});
+    setMat4(shader.ID, "model", model);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDisable(GL_DEPTH_TEST);
+    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(framebufferShader.ID);
+    glBindVertexArray(quad.VAO);
+    glBindTexture(GL_TEXTURE_2D, fbo_texture);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
     //                       
     // glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
     // glStencilMask(0x00);
@@ -307,6 +381,7 @@ int main()
   glDeleteVertexArrays(1, &plane.VAO);
   glDeleteBuffers(1, &cube.VAO);
   glDeleteBuffers(1, &plane.VAO);
+  glDeleteBuffers(1, &fbo);
 
   glfwTerminate();
   return 0;
@@ -398,14 +473,14 @@ int comp(const void* a, const void* b)
   return (*(int*)a - *(int*)b);
 }
 
-int comp_position_from_camera(const void* a, const void* b)
-{
-  return (((PositionFromCamera*)b)->distance_from_camera - ((PositionFromCamera*)a)->distance_from_camera);
-}
-
 void sort_float_array(float array[], int array_size, float next_distance)
 {
   qsort(array, array_size, sizeof(float), comp);
+}
+
+int comp_position_from_camera(const void* a, const void* b)
+{
+  return (((PositionFromCamera*)b)->distance_from_camera - ((PositionFromCamera*)a)->distance_from_camera);
 }
 
 void sort_position_cam(PositionFromCamera array[], int array_size)

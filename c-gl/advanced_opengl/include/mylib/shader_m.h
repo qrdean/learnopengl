@@ -47,27 +47,27 @@ char *LoadFileText(const char *filename)
           if (count < size) text = (char*)realloc(text, count + 1);
 
           text[count] = '\0';
-          printf("fileio text file loaded successfully %s", filename);
+          printf("fileio text file loaded successfully %s\n", filename);
         } 
         else 
         {
-          printf("FILEIO: failed to allocate memory for file %s ", filename);
+          printf("FILEIO: failed to allocate memory for file %s\n", filename);
         }
       }
       else 
       {
-        printf("FILEIO: failed to read file %s", filename);
+        printf("FILEIO: failed to read file %s\n", filename);
       }
 
       fclose(file);
     } else 
     {
-      printf("FILEIO: failed to open file %s",  filename);
+      printf("FILEIO: failed to open file %s\n",  filename);
     }
   } 
   else 
   {
-      printf("FILEIO: file name not valid");
+      printf("FILEIO: file name not valid\n");
   }
   return text;
 }
