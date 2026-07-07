@@ -24,6 +24,7 @@ void sort_float_array(float array[], int array_size, float next_distance);
 int gl_initialization();
 GLFWwindow* gl_initialize_window();
 uint32_t load_texture(const char *path);
+uint32_t load_cubemap(const char *faces[]);
 
 const uint32_t SCR_WIDTH = 800;
 const uint32_t SCR_HEIGHT = 600;
@@ -34,6 +35,7 @@ uint8_t first_mouse = 1;
 
 float delta_time = 0.0f;
 float last_frame = 0.0f;
+
 
 typedef struct {
   vec3 position;
@@ -67,6 +69,7 @@ int main()
   Shader shader = createShader("shaders/depth_test.vs", "shaders/depth_test.fs");
   Shader colorShader = createShader("shaders/depth_test.vs", "shaders/stencil_shader.fs");
   Shader framebufferShader = createShader("shaders/framebuffer_test.vs", "shaders/framebuffer_test.fs");
+  Shader skyboxShader = createShader("shaders/skybox_shader.vs", "shaders/skybox_shader.fs");
 
   float cubeVertices[] = {
       // positions          // texture Coords
@@ -154,6 +157,51 @@ int main()
      1.0f,  1.0f,  1.0f, 1.0f
   };	
 
+  float skyboxVertices[] = {
+    // positions          
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+    -1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f
+  };
+
   PositionFromCamera vegetation_position_structs[] = {
     {{vegetation_positions[0][0], vegetation_positions[0][1], vegetation_positions[0][2]}, 0.0f},
     {{vegetation_positions[1][0], vegetation_positions[1][1], vegetation_positions[1][2]}, 0.0f},
@@ -213,12 +261,32 @@ int main()
   glEnableVertexAttribArray(1);
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
+  // TODO: setup the skybox VAO and VBO;
+  vertex_holder skybox;
+  glGenVertexArrays(1, &skybox.VAO);
+  glGenBuffers(1, &skybox.VBO);
+  glBindVertexArray(skybox.VAO);
+  glBindBuffer(GL_ARRAY_BUFFER, skybox.VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), &skyboxVertices, GL_STATIC_DRAW);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+  glBindVertexArray(0);
+
   uint32_t cube_texture = load_texture("assets/marble.jpg");
   uint32_t floor_texture = load_texture("assets/metal.png");
   uint32_t grass_texture = load_texture("assets/grass.png");
   uint32_t glass_texture = load_texture("assets/blending_transparent_window.png");
   uint32_t container_texture = load_texture("assets/container.jpg");
 
+  const char *faces[] = {
+    "assets/right.jpg", 
+    "assets/left.jpg", 
+    "assets/top.jpg",
+    "assets/bottom.jpg",
+    "assets/front.jpg",
+    "assets/back.jpg"
+  };
+  uint32_t cube_map_texture_id = load_cubemap(faces);
 
   // load textures need to get
   glUseProgram(shader.ID);
@@ -226,6 +294,9 @@ int main()
 
   glUseProgram(framebufferShader.ID);
   setInt(framebufferShader.ID, "screenTexture", 0);
+
+  glUseProgram(skyboxShader.ID);
+  setInt(skyboxShader.ID, "skybox", 0);
 
   uint32_t fbo;
   glGenFramebuffers(1, &fbo);
@@ -250,8 +321,7 @@ int main()
   // attach
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
 
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) 
-  {
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     // glGetError();
     printf("[OPENGL_ERROR]: FrameBuffer %i could not be completed\n", fbo);
   } else {
@@ -278,11 +348,14 @@ int main()
       sort_position_cam(vegetation_position_structs, 5);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glEnable(GL_DEPTH_TEST);
+    // glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    // glEnable(GL_DEPTH_TEST);
     
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // glDepthMask(GL_FALSE);
+    // glUseProgram(skyboxShader.ID);
     // glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 
     glUseProgram(shader.ID);
@@ -295,10 +368,14 @@ int main()
     setMat4(colorShader.ID, "view", view);
     setMat4(colorShader.ID, "projection", projection);
 
+    // mat3 temp_x = mat3(temp_v); 
+
+
     // glUseProgram(shader.ID);
     // setMat4(shader.ID, "view", view);
     // setMat4(shader.ID, "projection", projection);
 
+    glUseProgram(shader.ID);
     // glStencilMask(0x00);
     //
     // // floor
@@ -333,16 +410,39 @@ int main()
     setMat4(shader.ID, "model", model);
     glDrawArrays(GL_TRIANGLES, 0, 36);
 
+    // skybox
+    glDepthFunc(GL_LEQUAL);
+    glUseProgram(skyboxShader.ID);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glDisable(GL_DEPTH_TEST);
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
 
-    glUseProgram(framebufferShader.ID);
-    glBindVertexArray(quad.VAO);
-    glBindTexture(GL_TEXTURE_2D, fbo_texture);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    mat4 new_view = GLM_MAT4_IDENTITY_INIT;
+    Camera_GetViewMatrix(new_view);
+    mat4 temp_v = GLM_MAT4_IDENTITY_INIT;
+    mat3 temp_x = GLM_MAT3_IDENTITY_INIT;
+    Camera_GetViewMatrix(temp_v);
+    glm_mat4_pick3(temp_v, temp_x);
+    glm_mat4_identity(temp_v);
+    glm_mat4_ins3(temp_x, temp_v);
+    glm_mat4_copy(temp_v, new_view);
+
+    setMat4(skyboxShader.ID, "view", new_view);
+    setMat4(skyboxShader.ID, "projection", projection);
+    glBindVertexArray(skybox.VAO);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, cube_map_texture_id);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+    glDepthFunc(GL_LESS);
+
+    // glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // glDisable(GL_DEPTH_TEST);
+    // glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+    // glClear(GL_COLOR_BUFFER_BIT);
+    //
+    // glUseProgram(framebufferShader.ID);
+    // glBindVertexArray(quad.VAO);
+    // glBindTexture(GL_TEXTURE_2D, fbo_texture);
+    // glDrawArrays(GL_TRIANGLES, 0, 6);
 
     //                       
     // glStencilFunc(GL_NOTEQUAL, 1, 0xFF);
@@ -382,6 +482,8 @@ int main()
   glDeleteBuffers(1, &cube.VAO);
   glDeleteBuffers(1, &plane.VAO);
   glDeleteBuffers(1, &fbo);
+  glDeleteBuffers(1, &skybox.VAO);
+  glDeleteBuffers(1, &skybox.VBO);
 
   glfwTerminate();
   return 0;
@@ -522,4 +624,33 @@ uint32_t load_texture(const char *filename)
 
   return textureId;
 
+}
+
+uint32_t load_cubemap(const char *faces[])
+{
+  uint32_t cubemap_texture_id;
+  glGenTextures(1, &cubemap_texture_id);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, cubemap_texture_id);
+  // setup the cubemap faces
+  int width, height, nrChannels;
+  const int texture_faces_size = 6;
+  for (uint32_t i = 0; i < texture_faces_size; i++)
+  {
+    unsigned char *data = stbi_load(faces[i], &width, &height, &nrChannels, 0);
+    if (data) {
+      glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+      stbi_image_free(data);
+    } else {
+      printf("CUBEMAP TEXTURE FAILED TO LOAD AT %s\n", faces[i]);
+      stbi_image_free(data);
+    }
+  }
+
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+  return cubemap_texture_id;
 }
