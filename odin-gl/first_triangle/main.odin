@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 // import "core:io"
+import "core:io"
 import "base:runtime"
 import "core:os"
 import "vendor:glfw"
