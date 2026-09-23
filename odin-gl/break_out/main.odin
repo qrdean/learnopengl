@@ -6,9 +6,14 @@ import "core:image"
 import "core:image/png"
 import "core:math/linalg"
 import "core:math/linalg/glsl"
+import "core:math/rand"
 import "core:os"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
+import stbrp "vendor:stb/rect_pack"
+import stbtt "vendor:stb/truetype"
 
 import gl "vendor:OpenGL"
 import "vendor:glfw"
@@ -20,6 +25,12 @@ WINDOW_HEIGHT :: 600
 
 vec2 :: [2]f32
 vec3 :: [3]f32
+vec4 :: [4]f32
+
+Rect :: struct {
+	x, y: f32,
+	w, h: f32,
+}
 
 /****** global managers *******/
 
@@ -32,6 +43,8 @@ PLAYER_SIZE :: vec2{100., 20.}
 PLAYER_VELOCITY :: 500.
 player: game_object = {}
 ball: ball_object = {}
+MAX_PARTICLES :: 500
+particle_gen: particle_generator = {}
 
 /****** GAME STATE ******/
 
@@ -56,10 +69,22 @@ create_game :: proc() -> game {
 destroy_game :: proc(self: game) {}
 
 game_init :: proc(self: ^game) {
+	// sprite shader
 	load_shader(&resource_m, "shaders/sprite_shader.vs", "shaders/sprite_shader.fs", "", "sprite")
 	projection := glsl.mat4Ortho3d(0., cast(f32)self.width, cast(f32)self.height, 0., -1., 1.)
 	set_integer_shader(use_shader(get_shader(resource_m, "sprite")), "image", 0)
 	set_matrix_shader(get_shader(resource_m, "sprite"), "projection", projection)
+
+	// particle shader
+	load_shader(
+		&resource_m,
+		"shaders/particle_shader.vs",
+		"shaders/particle_shader.fs",
+		"",
+		"particle",
+	)
+	set_matrix_shader(get_shader(resource_m, "particle"), "projection", projection, true)
+
 	renderer = new_sprite_renderer(get_shader(resource_m, "sprite"))
 	init_render_data(&renderer)
 	// load textures
@@ -67,6 +92,7 @@ game_init :: proc(self: ^game) {
 	load_texture(&resource_m, "textures/block.png", false, "block")
 	load_texture(&resource_m, "textures/block_solid.png", false, "block_solid")
 	load_texture(&resource_m, "textures/paddle.png", true, "paddle")
+	load_texture(&resource_m, "textures/particle.png", true, "particle")
 	// load levels
 	one, two, three, four: game_level
 	load_game_level(&one, "levels/one.lvl", self.width, self.height / 2)
@@ -94,22 +120,39 @@ game_init :: proc(self: ^game) {
 		INITIAL_BALL_VELOCITY,
 		get_texture(resource_m, "face"),
 	)
+
+	particle_gen = new_particle_gen(
+		get_shader(resource_m, "particle"),
+		get_texture(resource_m, "particle"),
+		MAX_PARTICLES,
+	)
+
+	init_particle_gen(&particle_gen)
+
+	font_codepoints := utf8.string_to_runes(
+		"abcdefghiklmnopqrstuvwxyzåäöABCDEFGHIKLMNOPQRSTUVWXYZÅÄÖ!()1234567890., :",
+		context.temp_allocator,
+	)
+
+	load_static_font_from_bytes(#load("fonts/roboto.ttf"), 48, font_codepoints)
 }
 
 
 update :: proc(self: ^game, dt: f32) {
 	move_ball_object(&ball, dt, self.width)
 	game_collisions(self)
-  if (ball.position.y >= cast(f32)self.height) {
-    reset_player(self) 
-    reset_level(self) 
-  }
+	update_particle_gen(&particle_gen, dt, ball, 2, vec2{ball.radius / 2., ball.radius / 2.})
+	if (ball.position.y >= cast(f32)self.height) {
+		reset_player(self)
+		reset_level(self)
+	}
 }
 
 render :: proc(self: game, dt: f32) {
 	if (self.state == .ACTIVE) {
 		draw_game_level(self.levels[self.level], &renderer)
 		draw_game_object(player, &renderer)
+		draw_particle_gen(particle_gen)
 		draw_game_object(ball, &renderer)
 	}
 	// texture := get_texture(resource_m, "face")
@@ -117,24 +160,31 @@ render :: proc(self: game, dt: f32) {
 }
 
 reset_level :: proc(self: ^game) {
-  if (self.level == 0) {
-    load_game_level(&self.levels[0], "levels/one.lvl", self.width, self.height / 2)
-  }
-  if (self.level == 1) {
-    load_game_level(&self.levels[1], "levels/two.lvl", self.width, self.height / 2)
-  }
-  if (self.level == 2) {
-    load_game_level(&self.levels[1], "levels/three.lvl", self.width, self.height / 2)
-  }
-  if (self.level == 3) {
-    load_game_level(&self.levels[1], "levels/four.lvl", self.width, self.height / 2)
-  }
+	if (self.level == 0) {
+		load_game_level(&self.levels[0], "levels/one.lvl", self.width, self.height / 2)
+	}
+	if (self.level == 1) {
+		load_game_level(&self.levels[1], "levels/two.lvl", self.width, self.height / 2)
+	}
+	if (self.level == 2) {
+		load_game_level(&self.levels[1], "levels/three.lvl", self.width, self.height / 2)
+	}
+	if (self.level == 3) {
+		load_game_level(&self.levels[1], "levels/four.lvl", self.width, self.height / 2)
+	}
 }
 
 reset_player :: proc(self: ^game) {
-  player.size = PLAYER_SIZE
-  player.position = vec2{cast(f32)self.width / 2. - PLAYER_SIZE.x / 2., cast(f32)self.height - PLAYER_SIZE.y}
-  reset_ball_object(&ball, player.position + vec2{PLAYER_SIZE.x / 2. - BALL_RADIUS, -(BALL_RADIUS * 2.)}, INITIAL_BALL_VELOCITY)
+	player.size = PLAYER_SIZE
+	player.position = vec2 {
+		cast(f32)self.width / 2. - PLAYER_SIZE.x / 2.,
+		cast(f32)self.height - PLAYER_SIZE.y,
+	}
+	reset_ball_object(
+		&ball,
+		player.position + vec2{PLAYER_SIZE.x / 2. - BALL_RADIUS, -(BALL_RADIUS * 2.)},
+		INITIAL_BALL_VELOCITY,
+	)
 }
 
 game_collisions :: proc(self: ^game) {
@@ -168,17 +218,17 @@ game_collisions :: proc(self: ^game) {
 		}
 	}
 
-  collision, direction, diff_vector := check_ball_collision(ball, player)
-  if (!ball.stuck && collision) {
-    center_board := player.position.x + player.size.x / 2.
-    distance := (ball.position.x + ball.radius) - center_board
-    percentage := distance / player.size.x / 2.
-    strength: f32= 2.
-    old_velocity := ball.velocity
-    ball.velocity.x = INITIAL_BALL_VELOCITY.x * percentage * strength
-    ball.velocity.y = -ball.velocity.y
-    ball.velocity = linalg.normalize(ball.velocity) * linalg.length(old_velocity)
-  }
+	collision, direction, diff_vector := check_ball_collision(ball, player)
+	if (!ball.stuck && collision) {
+		center_board := player.position.x + player.size.x / 2.
+		distance := (ball.position.x + ball.radius) - center_board
+		percentage := distance / player.size.x / 2.
+		strength: f32 = 2.
+		old_velocity := ball.velocity
+		ball.velocity.x = INITIAL_BALL_VELOCITY.x * percentage * strength
+		ball.velocity.y = -ball.velocity.y
+		ball.velocity = linalg.normalize(ball.velocity) * linalg.length(old_velocity)
+	}
 }
 
 game_level :: struct {
@@ -254,8 +304,8 @@ load_game_level :: proc(self: ^game_level, file: string, level_width, level_heig
 			num, _ := strconv.parse_uint(elem)
 			append(&row, cast(u32)num)
 		}
-    row_slice := make([]u32, len(row))
-    copy(row_slice, row[:])
+		row_slice := make([]u32, len(row))
+		copy(row_slice, row[:])
 		append(&line_row, row_slice)
 		delete(row)
 		line_number += 1
@@ -266,9 +316,9 @@ load_game_level :: proc(self: ^game_level, file: string, level_width, level_heig
 		init_game_level(self, tile_data, level_width, level_height)
 	}
 
-  for rs in line_row {
-    delete(rs)
-  }
+	for rs in line_row {
+		delete(rs)
+	}
 }
 
 draw_game_level :: proc(self: game_level, renderer: ^sprite_renderer) {
@@ -433,11 +483,129 @@ move_ball_object :: proc(self: ^ball_object, dt: f32, window_width: u32) -> vec2
 }
 
 reset_ball_object :: proc(self: ^ball_object, pos, velocity: vec2) {
-  self.position = pos
-  self.velocity = velocity
-  self.stuck = true
+	self.position = pos
+	self.velocity = velocity
+	self.stuck = true
 }
 
+particle :: struct {
+	position: vec2,
+	velocity: vec2,
+	color:    vec4,
+	life:     f32,
+}
+
+new_particle_default :: proc() -> particle {
+	return particle{position = {0., 0.}, velocity = {0., 0.}, color = {1., 1., 1., 1.}, life = 0.}
+}
+
+new_particle :: proc(pos, vel: vec2, color: vec4, life: f32) -> particle {
+	return particle{position = pos, velocity = vel, color = color, life = life}
+}
+
+particle_generator :: struct {
+	particles: [dynamic]particle,
+	amount:    u32,
+	shader:    shader,
+	texture:   Texture2D,
+	vao:       u32,
+}
+
+new_particle_gen :: proc(shader: shader, texture: Texture2D, amount: u32) -> particle_generator {
+	return particle_generator{shader = shader, texture = texture, amount = amount}
+}
+
+init_particle_gen :: proc(self: ^particle_generator) {
+	vbo: u32
+	particle_quad := VERTICES
+	gl.GenVertexArrays(1, &self.vao)
+	gl.GenBuffers(1, &vbo)
+	gl.BindVertexArray(self.vao)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+	gl.BufferData(
+		gl.ARRAY_BUFFER,
+		size_of(particle_quad),
+		raw_data(&particle_quad),
+		gl.STATIC_DRAW,
+	)
+	gl.EnableVertexAttribArray(0)
+	gl.VertexAttribPointer(0, 4, gl.FLOAT, gl.FALSE, 4 * size_of(f32), 0)
+	gl.BindVertexArray(0)
+	for i in 0 ..< self.amount {
+		append(&self.particles, new_particle_default())
+	}
+}
+
+update_particle_gen :: proc(
+	self: ^particle_generator,
+	dt: f32,
+	object: game_object,
+	new_particles: u32,
+	offset: vec2 = {0., 0.},
+) {
+	nr_new_particles := 2
+	for i in 0 ..< nr_new_particles {
+		unused_particle := first_unused_particle(self)
+		respawn_particles(&self.particles[unused_particle], object, offset)
+	}
+
+	for i in 0 ..< MAX_PARTICLES {
+		particle := &self.particles[i]
+		particle.life -= dt
+		if particle.life > 0. {
+			particle.position -= particle.velocity * dt
+			particle.color.a -= dt * 2.5
+		}
+	}
+}
+
+draw_particle_gen :: proc(self: particle_generator) {
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE)
+	use_shader(self.shader)
+	for p in self.particles {
+		if p.life > 0. {
+			set_vector2f_shader(self.shader, "offset", p.position.x, p.position.y)
+			set_vector4f_shader(self.shader, "color", p.color.x, p.color.y, p.color.z, p.color.a)
+			// gl.ActiveTexture(gl.TEXTURE0)
+			bind_texture(self.texture)
+			gl.BindVertexArray(self.vao)
+			gl.DrawArrays(gl.TRIANGLES, 0, 6)
+			gl.BindVertexArray(0)
+		}
+	}
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+}
+
+last_used_particle := 0
+
+first_unused_particle :: proc(self: ^particle_generator) -> u32 {
+	// returns almost immediately unless we reach max
+	for i in last_used_particle ..< MAX_PARTICLES {
+		if self.particles[i].life <= 0. {
+			last_used_particle = i
+			return cast(u32)i
+		}
+	}
+	for i in 0 ..< last_used_particle {
+		if self.particles[i].life <= 0. {
+			last_used_particle = i
+			return cast(u32)i
+		}
+	}
+
+	// override first particle if all others are alive
+	last_used_particle = 0
+	return 0
+}
+
+respawn_particles :: proc(p: ^particle, object: game_object, offset: vec2 = {0., 0.}) {
+	random := (rand.float32() - 0.5) * 10.
+	r_color := 0.5 + ((rand.float32() * 100.) / 100.)
+	p.position = object.position + random + offset
+	p.color = vec4{r_color, r_color, r_color, 1.}
+	p.life = 1.
+	p.velocity = object.velocity * 0.1
+}
 
 framebuffer_size_callback :: proc "c" (window: glfw.WindowHandle, width: i32, height: i32) {
 	gl.Viewport(0, 0, width, height)
@@ -471,6 +639,255 @@ process_input :: proc "c" (window: glfw.WindowHandle, game: ^game, dt: f32) {
 		}
 	}
 }
+
+Texture_Filter :: enum {
+	Point,
+	Linear,
+}
+
+Font_Options :: struct {
+	premultiply_alpha: bool,
+	filter:            Texture_Filter,
+}
+
+Font_Type :: enum {
+	Static,
+	Dynamic,
+}
+
+// Font_Data :: struct {}
+
+Font_Baked_Glyph_Range :: struct {
+	start_idx: int,
+	start:     rune,
+	end:       rune,
+}
+
+Font_Baked_Glyph :: struct {
+	value:   rune,
+	index:   int,
+	rect:    Rect,
+	offset:  vec2,
+	advance: f32,
+}
+
+Image :: struct {
+	pixels: []vec4,
+	width:  int,
+	height: int,
+}
+
+load_static_font_from_bytes :: proc(
+	data: []byte,
+	font_size: f32,
+	codepoints: []rune = {},
+	options: Font_Options = {},
+) {
+	codepoints := codepoints
+	font_info: stbtt.fontinfo
+	font_offset := stbtt.GetFontOffsetForIndex(raw_data(data), 0)
+	init_ok := stbtt.InitFont(&font_info, raw_data(data), font_offset)
+
+	if !init_ok {
+		fmt.println("failed loading ttf/ttc font")
+		return
+	}
+
+	scale_factor := stbtt.ScaleForPixelHeight(&font_info, font_size)
+
+	ascent, descent, line_gap: i32
+	stbtt.GetFontVMetrics(&font_info, &ascent, &descent, &line_gap)
+
+	default_codepoints: [95]rune
+
+	if len(codepoints) == 0 {
+		for &d, idx in default_codepoints {
+			d = rune(idx + 32)
+		}
+
+		codepoints = default_codepoints[:]
+	}
+
+	glyph_ranges := make([dynamic]Font_Baked_Glyph_Range, context.allocator)
+	glyphs := make([dynamic]Font_Baked_Glyph, context.allocator)
+
+	for c in codepoints {
+		idx := stbtt.FindGlyphIndex(&font_info, c)
+
+		if idx > 0 {
+			advance: i32
+			stbtt.GetGlyphHMetrics(&font_info, idx, &advance, nil)
+
+			append(
+				&glyphs,
+				Font_Baked_Glyph {
+					value = c,
+					index = int(idx),
+					advance = f32(advance) * scale_factor,
+				},
+			)
+		}
+	}
+
+	slice.sort_by(glyphs[:], proc(i, j: Font_Baked_Glyph) -> bool {
+		return i.value < j.value
+	})
+
+	cur_glyph_range: Font_Baked_Glyph_Range
+
+	for g, g_idx in glyphs {
+		if g_idx == 0 {
+			cur_glyph_range = {
+				start     = g.value,
+				start_idx = g_idx,
+			}
+		} else if g.value != cur_glyph_range.end {
+			append(&glyph_ranges, cur_glyph_range)
+			cur_glyph_range = {
+				start     = g.value,
+				start_idx = g_idx,
+			}
+		}
+
+		cur_glyph_range.end = g.value + 1
+	}
+
+	Glyph_Image_Data :: struct {
+		pixels: [^]u8,
+		width:  i32,
+		height: i32,
+	}
+
+	glyphs_image_data := make([dynamic]Glyph_Image_Data, context.allocator)
+	glyphs_font_rects := make([dynamic]stbrp.Rect, context.allocator)
+
+	for &g, g_idx in glyphs {
+		x_offset: i32
+		y_offset: i32
+
+		width: i32
+		height: i32
+
+		pixels := stbtt.GetGlyphBitmap(
+			&font_info,
+			scale_factor,
+			scale_factor,
+			i32(g.index),
+			&width,
+			&height,
+			&x_offset,
+			&y_offset,
+		)
+
+		glyphs_image_data[g_idx] = {
+			pixels = pixels,
+			width  = width,
+			height = height,
+		}
+
+		g.offset = {f32(x_offset), f32(y_offset) + f32(ascent) * scale_factor}
+
+		glyphs_font_rects[g_idx] = {
+			w = stbrp.Coord(width) + 1,
+			h = stbrp.Coord(height) + 1,
+		}
+
+		atlas_size := 128
+		MAX_ATLAS_SIZE :: 4096
+		atlas_packed := false
+
+		for atlas_size <= MAX_ATLAS_SIZE {
+			// start packing rect for this iteration
+			rp_ctx: stbrp.Context
+			rp_nodes := make([]stbrp.Node, i32(atlas_size), context.allocator)
+
+			stbrp.init_target(
+				&rp_ctx,
+				i32(atlas_size),
+				i32(atlas_size),
+				raw_data(rp_nodes),
+				i32(len(rp_nodes)),
+			)
+
+			rect_pack_res := stbrp.pack_rects(
+				&rp_ctx,
+				raw_data(glyphs_font_rects),
+				i32(len(glyphs_font_rects)),
+			)
+
+			if rect_pack_res == 1 {
+				atlas_packed = true
+				break
+			}
+
+			atlas_size *= 2
+		}
+
+		if !atlas_packed {
+			fmt.println("failed to pack font atlas")
+			return
+		}
+
+
+		atlas := make([]vec4, atlas_size * atlas_size, context.allocator)
+
+		// TODO: Implement this option
+		if options.premultiply_alpha {} else {
+			for pr, pr_idx in glyphs_font_rects {
+				g := &glyphs[pr_idx]
+				g.rect = {f32(pr.x), f32(pr.y), f32(pr.w) - 1, f32(pr.h) - 1}
+
+				g_img := glyphs_image_data[pr_idx]
+				for sx in 0 ..< g_img.width {
+					for sy in 0 ..< g_img.height {
+						dx := int(pr.x) + int(sx)
+						dy := int(pr.y) + int(sy)
+
+						assert(dx >= 0 && dx < atlas_size)
+						assert(dy >= 0 && dy < atlas_size)
+
+						alpha := g_img.pixels[sy * g_img.width + sx] / 255
+						atlas[dy * atlas_size + dx] = {1.0, 1.0, 1.0, f32(alpha)}
+					}
+				}
+			}
+		}
+		for g_img_data in glyphs_image_data {
+			if g_img_data.pixels != nil {
+				stbtt.FreeBitmap(g_img_data.pixels, nil)
+			}
+		}
+
+		img := Image {
+			pixels = atlas,
+      width = atlas_size,
+      height = atlas_size,
+		}
+
+    tex := load_texture_from_image(img)
+    // set_texture_filter(tex, options.filter)
+	}
+
+
+	fmt.println("loaded the file")
+}
+
+load_texture_from_image :: proc(image: Image) -> Texture2D {
+  if image.width == 0 || image.height == 0 {
+    fmt.println("invalid image height or width is 0")
+    return {}
+  }
+
+  if len(image.pixels) != (image.width * image.height) {
+    fmt.printf("invalid image pixels array is not of size %d x %d\n", image.width, image.height)
+    return {}
+  }
+
+  return {
+    handle
+  }
+}
+
 
 main :: proc() {
 	glfw.Init()

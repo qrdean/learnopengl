@@ -1,5 +1,13 @@
 package main
 
+import "base:runtime"
+import "core:fmt"
+import "core:image"
+import "core:image/png"
+import "core:math/linalg/glsl"
+
+import gl "vendor:OpenGL"
+
 shader :: struct {
 	id: u32,
 }
