@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:image"
 import "core:image/png"
 import "core:math/linalg/glsl"
+import "core:os"
 import "core:slice"
 
 import gl "vendor:OpenGL"
@@ -94,13 +95,13 @@ check_compile_errors :: proc(object: u32, type: string) {
 	if type != "PROGRAM" {
 		gl.GetShaderiv(object, gl.COMPILE_STATUS, &success)
 		if success != 1 {
-			gl.GetShaderInfoLog(object, 1024, nil, raw_data(info_log[:]))
+			gl.GetProgramInfoLog(object, 1024, nil, raw_data(info_log[:]))
 			fmt.printf("| ERROR::SHADER: Compile-time error: Type: %s \n", type)
 		}
 	} else {
 		gl.GetProgramiv(object, gl.LINK_STATUS, &success)
 		if success != 1 {
-			gl.GetShaderInfoLog(object, 1024, nil, raw_data(info_log[:]))
+			gl.GetProgramInfoLog(object, 1024, nil, raw_data(info_log[:]))
 			fmt.printf("| ERROR::SHADER: Compile-time error: Type: %s \n", type)
 		}
 	}
@@ -202,21 +203,33 @@ clear_resource_manager :: proc(rm: resource_manager) {
 }
 
 load_shader_from_file :: proc(vShaderFile, fShaderFile, gShaderFile: string) -> shader {
-	vData, ok := read_entire_file(vShaderFile, context.allocator)
+	vData, vErr := os.read_entire_file(vShaderFile, context.allocator)
+	if vErr != nil {
+		fmt.eprintf("[shader] cannot read %q: %v\n", vShaderFile, vErr)
+		return {}
+	}
+	defer delete(vData)
+	fData, fErr := os.read_entire_file(fShaderFile, context.allocator)
+	if fErr != nil {
+		fmt.eprintf("[shader] cannot read %q: %f\n", fShaderFile, fErr)
+		return {}
+	}
+	defer delete(fData)
+	program, ok := gl.load_shaders_source(string(vData), string(fData))
 	if !ok {
-		fmt.printf("ERROR reading vertex file\n")
+		compile_msg, compile_type, link_msg, _ := gl.get_last_error_messages()
+		if compile_msg != "" {
+			fmt.eprintf("[shader] %v compile error:\n%s\n", compile_type, compile_msg)
+		}
+		if link_msg != "" {
+			fmt.eprintf("[shader] link error:\n%s\n", link_msg)
+		}
+		if compile_msg == "" && link_msg == "" {
+			fmt.eprintf("[shader] build failed with no logs: %q + %q\n", vShaderFile, fShaderFile)
+		}
 		return {}
 	}
-	fData, ok_2 := read_entire_file(fShaderFile, context.allocator)
-	if !ok_2 {
-		fmt.printf("ERROR reading fragment file\n")
-		return {}
-	}
-	s: shader
-	v_shader_copy := cstring(raw_data(vData))
-	f_shader_copy := cstring(raw_data(fData))
-	compile_shader(&s, &v_shader_copy, &f_shader_copy)
-	return s
+	return shader{id = program}
 }
 
 load_texture_from_file :: proc(file: string, alpha: bool) -> Texture2D {
@@ -354,29 +367,29 @@ draw_text :: proc(
 	scale: f32 = 1.,
 	color: vec3 = {1., 1., 1.},
 ) {
-  line_height := (font.ascent - font.descent + font.line_gap) * scale
-  pen := position
+	line_height := (font.ascent - font.descent + font.line_gap) * scale
+	pen := position
 
-  for r in text {
-    if r == '\n' {
-      pen = {position.x, pen.y + line_height}
-      continue
-    }
+	for r in text {
+		if r == '\n' {
+			pen = {position.x, pen.y + line_height}
+			continue
+		}
 
-    g, found := font_get_glyph(font, r)
-    if !found {continue}
+		g, found := font_get_glyph(font, r)
+		if !found {continue}
 
-    if g.rect.w > 0. && g.rect.h > 0. {
-      draw_sprite_rect(
-        self,
-        font.texture,
-        g.rect,
-        {pen.x + g.offset.x *scale, pen.y + g.offset.y * scale},
-        {g.rect.w * scale, g.rect.h * scale},
-        0.,
-        color,
-      )
-    }
-    pen.x += g.advance * scale
-  }
+		if g.rect.w > 0. && g.rect.h > 0. {
+			draw_sprite_rect(
+				self,
+				font.texture,
+				g.rect,
+				{pen.x + g.offset.x * scale, pen.y + g.offset.y * scale},
+				{g.rect.w * scale, g.rect.h * scale},
+				0.,
+				color,
+			)
+		}
+		pen.x += g.advance * scale
+	}
 }

@@ -72,19 +72,23 @@ destroy_game :: proc(self: game) {}
 
 game_init :: proc(self: ^game) {
 	// sprite shader
-	load_shader(&resource_m, "shaders/sprite_shader.vs", "shaders/sprite_shader.fs", "", "sprite")
+	require(
+		load_shader(&resource_m, "shaders/sprite_shader.vs", "shaders/sprite_shader.fs", "", "sprite").id !=
+		0,
+		"sprite shader failed to load",
+	)
 	projection := glsl.mat4Ortho3d(0., cast(f32)self.width, cast(f32)self.height, 0., -1., 1.)
 	set_integer_shader(use_shader(get_shader(resource_m, "sprite")), "image", 0)
 	set_matrix_shader(get_shader(resource_m, "sprite"), "projection", projection)
 
 	// particle shader
-	load_shader(
+	require(load_shader(
 		&resource_m,
 		"shaders/particle_shader.vs",
 		"shaders/particle_shader.fs",
 		"",
 		"particle",
-	)
+	).id != 0, "particle shader failed to load")
 	set_matrix_shader(get_shader(resource_m, "particle"), "projection", projection, true)
 
 	renderer = new_sprite_renderer(get_shader(resource_m, "sprite"))
@@ -901,7 +905,7 @@ load_static_font_from_bytes :: proc(
 	// 				dx := int(pr.x) + int(sx)
 	// 				dy := int(pr.y) + int(sy)
 	//
-	// 				assert(dx >= 0 && dx < atlas_size)
+	// assert(dx >= 0 && dx < atlas_size)
 	// 				assert(dy >= 0 && dy < atlas_size)
 	//
 	// 				alpha := f32(g_img.pixels[sy * g_img.width + sx]) / 255.
@@ -968,9 +972,17 @@ load_texture_from_image :: proc(image: Image, filter: Texture_Filter = .Linear) 
 	return t
 }
 
+glfw_error_callback :: proc "c" (code: i32, description: cstring) {
+	context = runtime.default_context()
+	fmt.printf("[GLFW %d] %s\n", code, description)
+}
 
 main :: proc() {
-	glfw.Init()
+	glfw.SetErrorCallback(glfw_error_callback)
+	if !glfw.Init() {
+		fmt.println("[GLFW] init failed")
+		os.exit(1)
+	}
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, GL_MAJOR_V)
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, GL_MINOR_V)
 	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
