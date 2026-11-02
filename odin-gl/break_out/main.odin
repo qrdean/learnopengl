@@ -36,6 +36,7 @@ Rect :: struct {
 
 resource_m: resource_manager = {}
 renderer: sprite_renderer = {}
+font: Font = {}
 
 /****** player *******/
 
@@ -60,6 +61,7 @@ game :: struct {
 	height: u32,
 	levels: [dynamic]game_level,
 	level:  u32,
+	score:  u32,
 }
 
 create_game :: proc() -> game {
@@ -93,6 +95,9 @@ game_init :: proc(self: ^game) {
 	load_texture(&resource_m, "textures/block_solid.png", false, "block_solid")
 	load_texture(&resource_m, "textures/paddle.png", true, "paddle")
 	load_texture(&resource_m, "textures/particle.png", true, "particle")
+
+	gl.Enable(gl.BLEND)
+	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	// load levels
 	one, two, three, four: game_level
 	load_game_level(&one, "levels/one.lvl", self.width, self.height / 2)
@@ -104,6 +109,7 @@ game_init :: proc(self: ^game) {
 	append(&self.levels, three)
 	append(&self.levels, four)
 	self.level = 0
+	self.score = 0
 
 	// player
 	player_pos := vec2 {
@@ -130,11 +136,26 @@ game_init :: proc(self: ^game) {
 	init_particle_gen(&particle_gen)
 
 	font_codepoints := utf8.string_to_runes(
-		"abcdefghiklmnopqrstuvwxyzåäöABCDEFGHIKLMNOPQRSTUVWXYZÅÄÖ!()1234567890., :",
+		"abcdefghijklmnopqrstuvwxyzåäöABCDEFGHIKLMNOPQRSTUVWXYZÅÄÖ!()1234567890., :;'?+-*/%=<>_",
 		context.temp_allocator,
 	)
 
-	load_static_font_from_bytes(#load("fonts/roboto.ttf"), 48, font_codepoints)
+	loaded_font, ok := load_static_font_from_bytes(#load("fonts/roboto.ttf"), 48, font_codepoints)
+	if !ok {
+		fmt.println("failed to load font")
+		os.exit(1)
+	}
+
+	font = loaded_font
+	fmt.printf(
+		"font: %d glyphs, %d ranges, tex=%d (%dx%d), ascent=%v\n",
+		len(font.glyphs),
+		len(font.glyphs_ranges),
+		font.texture.Id,
+		font.texture.width,
+		font.texture.height,
+		font.ascent,
+	)
 }
 
 
@@ -155,6 +176,9 @@ render :: proc(self: game, dt: f32) {
 		draw_particle_gen(particle_gen)
 		draw_game_object(ball, &renderer)
 	}
+	buf: [64]u8
+	text := fmt.bprintf(buf[:], "score: %d | level: %d", self.score, self.level)
+	draw_text(&renderer, &font, text, {50., 500.})
 	// texture := get_texture(resource_m, "face")
 	// draw_sprite(&renderer, texture, {200., 200.}, {300., 400.}, 45., {0., 1., 0.})
 }
@@ -194,6 +218,7 @@ game_collisions :: proc(self: ^game) {
 			if collision {
 				if !box.is_solid {
 					box.destroyed = true
+					self.score += 1
 				}
 
 				switch direction {
@@ -672,9 +697,25 @@ Font_Baked_Glyph :: struct {
 }
 
 Image :: struct {
-	pixels: []vec4,
+	pixels: []u8,
 	width:  int,
 	height: int,
+}
+
+Glyph_Bitmap :: struct {
+	pixels: [^]u8,
+	width:  i32,
+	height: i32,
+}
+
+Font :: struct {
+	texture:       Texture2D,
+	glyphs:        [dynamic]Font_Baked_Glyph,
+	glyphs_ranges: [dynamic]Font_Baked_Glyph_Range,
+	ascent:        f32,
+	descent:       f32,
+	line_gap:      f32,
+	size:          f32,
 }
 
 load_static_font_from_bytes :: proc(
@@ -682,11 +723,19 @@ load_static_font_from_bytes :: proc(
 	font_size: f32,
 	codepoints: []rune = {},
 	options: Font_Options = {},
+) -> (
+	font: Font,
+	ok: bool,
 ) {
 	codepoints := codepoints
 	font_info: stbtt.fontinfo
 	font_offset := stbtt.GetFontOffsetForIndex(raw_data(data), 0)
+	if font_offset < 0 {
+		fmt.println("failed loading ttf/ttc font")
+		return
+	}
 	init_ok := stbtt.InitFont(&font_info, raw_data(data), font_offset)
+
 
 	if !init_ok {
 		fmt.println("failed loading ttf/ttc font")
@@ -694,9 +743,13 @@ load_static_font_from_bytes :: proc(
 	}
 
 	scale_factor := stbtt.ScaleForPixelHeight(&font_info, font_size)
+	font.size = font_size
 
 	ascent, descent, line_gap: i32
 	stbtt.GetFontVMetrics(&font_info, &ascent, &descent, &line_gap)
+	font.ascent = f32(ascent) * scale_factor
+	font.descent = f32(descent) * scale_factor
+	font.line_gap = f32(line_gap) * scale_factor
 
 	default_codepoints: [95]rune
 
@@ -708,184 +761,211 @@ load_static_font_from_bytes :: proc(
 		codepoints = default_codepoints[:]
 	}
 
-	glyph_ranges := make([dynamic]Font_Baked_Glyph_Range, context.allocator)
-	glyphs := make([dynamic]Font_Baked_Glyph, context.allocator)
+	seen := make(map[rune]bool, context.allocator)
+	defer delete(seen)
+
+	// glyph_ranges := make([dynamic]Font_Baked_Glyph_Range, context.allocator)
+	// glyphs := make([dynamic]Font_Baked_Glyph, context.allocator)
 
 	for c in codepoints {
-		idx := stbtt.FindGlyphIndex(&font_info, c)
-
-		if idx > 0 {
-			advance: i32
-			stbtt.GetGlyphHMetrics(&font_info, idx, &advance, nil)
-
-			append(
-				&glyphs,
-				Font_Baked_Glyph {
-					value = c,
-					index = int(idx),
-					advance = f32(advance) * scale_factor,
-				},
-			)
+		if seen[c] {
+			continue
 		}
+		seen[c] = true
+		idx := stbtt.FindGlyphIndex(&font_info, c)
+		// NOTE: silently dropping codepoints missing from the font. Might add missing codepoints to
+		// a debug list?
+		if idx == 0 {
+			continue
+		}
+
+		advance: i32
+		stbtt.GetGlyphHMetrics(&font_info, idx, &advance, nil)
+		append(
+			&font.glyphs,
+			Font_Baked_Glyph{value = c, index = int(idx), advance = f32(advance) * scale_factor},
+		)
 	}
 
-	slice.sort_by(glyphs[:], proc(i, j: Font_Baked_Glyph) -> bool {
+	slice.sort_by(font.glyphs[:], proc(i, j: Font_Baked_Glyph) -> bool {
 		return i.value < j.value
 	})
 
-	cur_glyph_range: Font_Baked_Glyph_Range
-
-	for g, g_idx in glyphs {
-		if g_idx == 0 {
-			cur_glyph_range = {
-				start     = g.value,
-				start_idx = g_idx,
-			}
-		} else if g.value != cur_glyph_range.end {
-			append(&glyph_ranges, cur_glyph_range)
-			cur_glyph_range = {
-				start     = g.value,
-				start_idx = g_idx,
-			}
+	if len(font.glyphs) > 0 {
+		cur := Font_Baked_Glyph_Range {
+			start     = font.glyphs[0].value,
+			start_idx = 0,
+			end       = font.glyphs[0].value + 1,
 		}
 
-		cur_glyph_range.end = g.value + 1
+		for g, g_idx in font.glyphs {
+			if g_idx > 0 && g.value != cur.end {
+				append(&font.glyphs_ranges, cur)
+				cur = {
+					start     = g.value,
+					start_idx = g_idx,
+				}
+			}
+			cur.end = g.value + 1
+		}
+		append(&font.glyphs_ranges, cur)
 	}
 
-	Glyph_Image_Data :: struct {
-		pixels: [^]u8,
-		width:  i32,
-		height: i32,
+	bitmaps := make([]Glyph_Bitmap, len(font.glyphs), context.allocator)
+	defer {
+		for b in bitmaps {
+			if b.pixels != nil {
+				stbtt.FreeBitmap(b.pixels, nil)
+			}
+		}
+		delete(bitmaps)
 	}
 
-	glyphs_image_data := make([dynamic]Glyph_Image_Data, context.allocator)
-	glyphs_font_rects := make([dynamic]stbrp.Rect, context.allocator)
+	rects := make([]stbrp.Rect, len(font.glyphs), context.allocator)
+	defer delete(rects)
 
-	for &g, g_idx in glyphs {
+	for &g, g_idx in font.glyphs {
 		x_offset: i32
 		y_offset: i32
-
 		width: i32
 		height: i32
 
-		pixels := stbtt.GetGlyphBitmap(
-			&font_info,
-			scale_factor,
-			scale_factor,
-			i32(g.index),
-			&width,
-			&height,
-			&x_offset,
-			&y_offset,
-		)
-
-		glyphs_image_data[g_idx] = {
-			pixels = pixels,
+		bitmaps[g_idx] = {
+			pixels = stbtt.GetGlyphBitmap(
+				&font_info,
+				scale_factor,
+				scale_factor,
+				i32(g.index),
+				&width,
+				&height,
+				&x_offset,
+				&y_offset,
+			),
 			width  = width,
 			height = height,
 		}
+		g.offset = {f32(x_offset), f32(y_offset) + font.ascent}
+		rects[g_idx] = {
+			id = i32(g_idx),
+			w  = stbrp.Coord(width) + 1,
+			h  = stbrp.Coord(height) + 1,
+		}
+	}
 
-		g.offset = {f32(x_offset), f32(y_offset) + f32(ascent) * scale_factor}
+	atlas_size := 128
+	MAX_ATLAS_SIZE :: 4096
+	rp_nodes := make([]stbrp.Node, i32(atlas_size), context.allocator)
+	defer delete(rp_nodes)
+	atlas_packed := false
 
-		glyphs_font_rects[g_idx] = {
-			w = stbrp.Coord(width) + 1,
-			h = stbrp.Coord(height) + 1,
+	for atlas_size <= MAX_ATLAS_SIZE {
+		// start packing rect for this iteration
+		rp_ctx: stbrp.Context
+
+		stbrp.init_target(
+			&rp_ctx,
+			i32(atlas_size),
+			i32(atlas_size),
+			raw_data(rp_nodes),
+			i32(len(rp_nodes)),
+		)
+
+		rect_pack_res := stbrp.pack_rects(&rp_ctx, raw_data(rects), i32(len(rects)))
+
+		if rect_pack_res == 1 {
+			atlas_packed = true
+			break
 		}
 
-		atlas_size := 128
-		MAX_ATLAS_SIZE :: 4096
-		atlas_packed := false
-
-		for atlas_size <= MAX_ATLAS_SIZE {
-			// start packing rect for this iteration
-			rp_ctx: stbrp.Context
-			rp_nodes := make([]stbrp.Node, i32(atlas_size), context.allocator)
-
-			stbrp.init_target(
-				&rp_ctx,
-				i32(atlas_size),
-				i32(atlas_size),
-				raw_data(rp_nodes),
-				i32(len(rp_nodes)),
-			)
-
-			rect_pack_res := stbrp.pack_rects(
-				&rp_ctx,
-				raw_data(glyphs_font_rects),
-				i32(len(glyphs_font_rects)),
-			)
-
-			if rect_pack_res == 1 {
-				atlas_packed = true
-				break
-			}
-
-			atlas_size *= 2
-		}
-
-		if !atlas_packed {
-			fmt.println("failed to pack font atlas")
-			return
-		}
-
-
-		atlas := make([]vec4, atlas_size * atlas_size, context.allocator)
-
-		// TODO: Implement this option
-		if options.premultiply_alpha {} else {
-			for pr, pr_idx in glyphs_font_rects {
-				g := &glyphs[pr_idx]
-				g.rect = {f32(pr.x), f32(pr.y), f32(pr.w) - 1, f32(pr.h) - 1}
-
-				g_img := glyphs_image_data[pr_idx]
-				for sx in 0 ..< g_img.width {
-					for sy in 0 ..< g_img.height {
-						dx := int(pr.x) + int(sx)
-						dy := int(pr.y) + int(sy)
-
-						assert(dx >= 0 && dx < atlas_size)
-						assert(dy >= 0 && dy < atlas_size)
-
-						alpha := g_img.pixels[sy * g_img.width + sx] / 255
-						atlas[dy * atlas_size + dx] = {1.0, 1.0, 1.0, f32(alpha)}
-					}
-				}
-			}
-		}
-		for g_img_data in glyphs_image_data {
-			if g_img_data.pixels != nil {
-				stbtt.FreeBitmap(g_img_data.pixels, nil)
-			}
-		}
-
-		img := Image {
-			pixels = atlas,
-      width = atlas_size,
-      height = atlas_size,
-		}
-
-    tex := load_texture_from_image(img)
-    // set_texture_filter(tex, options.filter)
+		atlas_size *= 2
 	}
 
 
+	if !atlas_packed {
+		fmt.println("failed to pack font atlas")
+		return {}, false
+	}
+
+
+	atlas := make([]vec4, atlas_size * atlas_size, context.allocator)
+
+	// TODO: Implement this option
+	// if options.premultiply_alpha {} else {
+	// 	for pr, pr_idx in rects {
+	// 		g := &font.glyphs[pr_idx]
+	// 		g.rect = {f32(pr.x), f32(pr.y), f32(pr.w) - 1, f32(pr.h) - 1}
+	//
+	// 		g_img := image_data[pr_idx]
+	// 		for sx in 0 ..< g_img.width {
+	// 			for sy in 0 ..< g_img.height {
+	// 				dx := int(pr.x) + int(sx)
+	// 				dy := int(pr.y) + int(sy)
+	//
+	// 				assert(dx >= 0 && dx < atlas_size)
+	// 				assert(dy >= 0 && dy < atlas_size)
+	//
+	// 				alpha := f32(g_img.pixels[sy * g_img.width + sx]) / 255.
+	// 				atlas[dy * atlas_size + dx] = {1.0, 1.0, 1.0, f32(alpha)}
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	pixels := make([]u8, atlas_size * atlas_size * 4, context.allocator)
+	defer delete(pixels)
+
+	for pr in rects {
+		i := int(pr.id)
+		g := &font.glyphs[i]
+		g.rect = {f32(pr.x), f32(pr.y), f32(pr.w) - 1, f32(pr.h) - 1}
+
+		b := bitmaps[i]
+		for sy in 0 ..< b.height {
+			for sx in 0 ..< b.width {
+				a := f32(b.pixels[int(sy) * int(b.width) + int(sx)]) / 255.0
+				dx := int(pr.x) + int(sx)
+				dy := int(pr.y) + int(sy)
+				o := (dy * atlas_size + dx) * 4
+
+				rgb := u8(255)
+				if options.premultiply_alpha {rgb = u8(a * 255.0)}
+
+				pixels[o + 0] = rgb
+				pixels[o + 1] = rgb
+				pixels[o + 2] = rgb
+				pixels[o + 3] = u8(a * 255.0)
+			}
+		}
+	}
+
+	// for g_img_data in glyphs_image_data {
+	// 	if g_img_data.pixels != nil {
+	// 		stbtt.FreeBitmap(g_img_data.pixels, nil)
+	// 	}
+	// }
+
+	img := Image {
+		pixels = pixels,
+		width  = atlas_size,
+		height = atlas_size,
+	}
+
+	font.texture = load_texture_from_image(img, options.filter)
 	fmt.println("loaded the file")
+
+	return font, true
 }
 
-load_texture_from_image :: proc(image: Image) -> Texture2D {
-  if image.width == 0 || image.height == 0 {
-    fmt.println("invalid image height or width is 0")
-    return {}
-  }
-
-  if len(image.pixels) != (image.width * image.height) {
-    fmt.printf("invalid image pixels array is not of size %d x %d\n", image.width, image.height)
-    return {}
-  }
-
-  return {
-    handle
-  }
+load_texture_from_image :: proc(image: Image, filter: Texture_Filter = .Linear) -> Texture2D {
+	t := new_texture_2d()
+	t.internal_format = gl.RGBA
+	t.image_format = gl.RGBA
+	t.wrap_s = gl.CLAMP_TO_EDGE
+	t.wrap_t = gl.CLAMP_TO_EDGE
+	t.filter_min = gl.LINEAR if filter == .Linear else gl.NEAREST
+	t.filter_max = t.filter_min
+	generate_texture_2d(&t, i32(image.width), i32(image.height), raw_data(image.pixels))
+	return t
 }
 
 

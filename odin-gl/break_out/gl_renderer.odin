@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:image"
 import "core:image/png"
 import "core:math/linalg/glsl"
+import "core:slice"
 
 import gl "vendor:OpenGL"
 
@@ -121,7 +122,7 @@ new_texture_2d :: proc() -> Texture2D {
 	t := Texture2D {
 		width           = 0,
 		height          = 0,
-		internal_format = gl.RGB,
+		internal_format = gl.RGBA,
 		image_format    = gl.RGB,
 		wrap_s          = gl.REPEAT,
 		wrap_t          = gl.REPEAT,
@@ -280,17 +281,52 @@ draw_sprite :: proc(
 	rotate: f32 = 0.,
 	color: vec3 = {1., 1., 1.},
 ) {
+	draw_sprite_rect(
+		self,
+		texture,
+		Rect{0., 0., f32(texture.width), f32(texture.height)},
+		position,
+		size,
+		rotate,
+		color,
+	)
+}
+
+draw_sprite_rect :: proc(
+	self: ^sprite_renderer,
+	texture: Texture2D,
+	src: Rect,
+	position: vec2,
+	size: vec2 = {},
+	rotate: f32 = 0.,
+	color: vec3 = {1., 1., 1.},
+) {
+	dst := size
+	if dst.x == 0. && dst.y == 0. {
+		dst = {src.w, src.h}
+	}
+
 	use_shader(self.shader)
 	model: glsl.mat4 = 1.
 	model *= glsl.mat4Translate({position.x, position.y, 0.})
-
 	model *= glsl.mat4Translate({0.5 * size.x, 0.5 * size.y, 0.})
 	model *= glsl.mat4Rotate({0., 0., 1.}, glsl.radians(rotate))
-	model *= glsl.mat4Translate({-.5 * size.x, -0.5 * size.y, 0.})
-	model *= glsl.mat4Scale({size.x, size.y, 1.})
+	model *= glsl.mat4Translate({-.5 * dst.x, -0.5 * dst.y, 0.})
+	model *= glsl.mat4Scale({dst.x, dst.y, 1.})
 
 	set_matrix_shader(self.shader, "model", model)
 	set_vector3f_shader(self.shader, "spriteColor", color.x, color.y, color.z)
+
+	tw := f32(texture.width)
+	th := f32(texture.height)
+	set_vector4f_shader(
+		self.shader,
+		"uvRect",
+		src.x / tw,
+		src.y / th,
+		(src.x + src.w) / tw,
+		(src.y + src.h) / th,
+	)
 
 	gl.ActiveTexture(gl.TEXTURE0)
 	bind_texture(texture)
@@ -298,4 +334,49 @@ draw_sprite :: proc(
 	gl.BindVertexArray(self.quad_vao)
 	gl.DrawArrays(gl.TRIANGLES, 0, 6)
 	gl.BindVertexArray(0)
+}
+
+font_get_glyph :: proc(font: ^Font, r: rune) -> (glyph: Font_Baked_Glyph, ok: bool) {
+	i, found := slice.binary_search_by(font.glyphs[:], r, proc(g: Font_Baked_Glyph, key: rune) -> slice.Ordering {
+		if g.value < key do return .Less
+		if g.value > key do return .Greater
+		return .Equal
+	})
+	if !found {return {}, false}
+	return font.glyphs[i], true
+}
+
+draw_text :: proc(
+	self: ^sprite_renderer,
+	font: ^Font,
+	text: string,
+	position: vec2,
+	scale: f32 = 1.,
+	color: vec3 = {1., 1., 1.},
+) {
+  line_height := (font.ascent - font.descent + font.line_gap) * scale
+  pen := position
+
+  for r in text {
+    if r == '\n' {
+      pen = {position.x, pen.y + line_height}
+      continue
+    }
+
+    g, found := font_get_glyph(font, r)
+    if !found {continue}
+
+    if g.rect.w > 0. && g.rect.h > 0. {
+      draw_sprite_rect(
+        self,
+        font.texture,
+        g.rect,
+        {pen.x + g.offset.x *scale, pen.y + g.offset.y * scale},
+        {g.rect.w * scale, g.rect.h * scale},
+        0.,
+        color,
+      )
+    }
+    pen.x += g.advance * scale
+  }
 }

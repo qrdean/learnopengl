@@ -5,10 +5,11 @@ out vec2 TexCoords;
 
 uniform mat4 model;
 uniform mat4 projection;
+uniform vec4 uvRect; // (u0, v0, u1, v1)
 
 void main()
 {
-  TexCoords = vertex.zw;
+  TexCoords = mix(uvRect.xy, uvRect.zw, vertex.zw);
   gl_Position = projection * model * vec4(vertex.xy, 0.0, 1.0);
 }
 
