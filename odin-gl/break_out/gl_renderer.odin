@@ -1,6 +1,5 @@
 package main
 
-import "base:runtime"
 import "core:fmt"
 import "core:image"
 import "core:image/png"
@@ -9,6 +8,8 @@ import "core:os"
 import "core:slice"
 
 import gl "vendor:OpenGL"
+
+_ :: png // registers the PNG decoder for image.load_from_file
 
 shader :: struct {
 	id: u32,
@@ -23,7 +24,7 @@ compile_shader :: proc(
 	vertex_source, fragment_source: ^cstring,
 	// geometry_source: string = nil,
 ) {
-	sVertex, sFragment, gShader: u32
+	sVertex, sFragment: u32
 	sVertex = gl.CreateShader(gl.VERTEX_SHADER)
 	gl.ShaderSource(sVertex, 1, vertex_source, nil)
 	gl.CompileShader(sVertex)
@@ -211,7 +212,7 @@ load_shader_from_file :: proc(vShaderFile, fShaderFile, gShaderFile: string) -> 
 	defer delete(vData)
 	fData, fErr := os.read_entire_file(fShaderFile, context.allocator)
 	if fErr != nil {
-		fmt.eprintf("[shader] cannot read %q: %f\n", fShaderFile, fErr)
+		fmt.eprintf("[shader] cannot read %q: %v\n", fShaderFile, fErr)
 		return {}
 	}
 	defer delete(fData)
@@ -233,19 +234,18 @@ load_shader_from_file :: proc(vShaderFile, fShaderFile, gShaderFile: string) -> 
 }
 
 load_texture_from_file :: proc(file: string, alpha: bool) -> Texture2D {
-	t := new_texture_2d()
 	img, img_err := image.load_from_file(file)
 	if img_err != nil {
-		fmt.printf("img_err: %v\n", img_err)
+		fmt.eprintf("[texture] cannot load %q: %v\n", file, img_err)
 		return {}
 	}
 	defer free(img)
 
+	t := new_texture_2d()
 	if alpha {
 		t.internal_format = gl.RGBA
 		t.image_format = gl.RGBA
 	}
-	// id: u32
 	generate_texture_2d(&t, cast(i32)img.width, cast(i32)img.height, raw_data(img.pixels.buf[:]))
 	return t
 }

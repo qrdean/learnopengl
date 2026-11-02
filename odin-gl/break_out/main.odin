@@ -2,8 +2,6 @@ package main
 
 import "base:runtime"
 import "core:fmt"
-import "core:image"
-import "core:image/png"
 import "core:math/linalg"
 import "core:math/linalg/glsl"
 import "core:math/rand"
@@ -94,20 +92,47 @@ game_init :: proc(self: ^game) {
 	renderer = new_sprite_renderer(get_shader(resource_m, "sprite"))
 	init_render_data(&renderer)
 	// load textures
-	load_texture(&resource_m, "textures/awesomeface.png", true, "face")
-	load_texture(&resource_m, "textures/block.png", false, "block")
-	load_texture(&resource_m, "textures/block_solid.png", false, "block_solid")
-	load_texture(&resource_m, "textures/paddle.png", true, "paddle")
-	load_texture(&resource_m, "textures/particle.png", true, "particle")
+	require(
+		load_texture(&resource_m, "textures/awesomeface.png", true, "face").Id != 0,
+		"failed to load textures/awesomeface.png",
+	)
+	require(
+		load_texture(&resource_m, "textures/block.png", false, "block").Id != 0,
+		"failed to load textures/block.png",
+	)
+	require(
+		load_texture(&resource_m, "textures/block_solid.png", false, "block_solid").Id != 0,
+		"failed to load textures/block_solid.png",
+	)
+	require(
+		load_texture(&resource_m, "textures/paddle.png", true, "paddle").Id != 0,
+		"failed to load textures/paddle.png",
+	)
+	require(
+		load_texture(&resource_m, "textures/particle.png", true, "particle").Id != 0,
+		"failed to load textures/particle.png",
+	)
 
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
 	// load levels
 	one, two, three, four: game_level
-	load_game_level(&one, "levels/one.lvl", self.width, self.height / 2)
-	load_game_level(&two, "levels/two.lvl", self.width, self.height / 2)
-	load_game_level(&three, "levels/three.lvl", self.width, self.height / 2)
-	load_game_level(&four, "levels/four.lvl", self.width, self.height / 2)
+	require(
+		load_game_level(&one, "levels/one.lvl", self.width, self.height / 2),
+		"failed to load levels/one.lvl",
+	)
+	require(
+		load_game_level(&two, "levels/two.lvl", self.width, self.height / 2),
+		"failed to load levels/two.lvl",
+	)
+	require(
+		load_game_level(&three, "levels/three.lvl", self.width, self.height / 2),
+		"failed to load levels/three.lvl",
+	)
+	require(
+		load_game_level(&four, "levels/four.lvl", self.width, self.height / 2),
+		"failed to load levels/four.lvl",
+	)
 	append(&self.levels, one)
 	append(&self.levels, two)
 	append(&self.levels, three)
@@ -145,10 +170,7 @@ game_init :: proc(self: ^game) {
 	)
 
 	loaded_font, ok := load_static_font_from_bytes(#load("fonts/roboto.ttf"), 48, font_codepoints)
-	if !ok {
-		fmt.println("failed to load font")
-		os.exit(1)
-	}
+	require(ok, "font failed to load (see loader message above)")
 
 	font = loaded_font
 	fmt.printf(
@@ -247,7 +269,7 @@ game_collisions :: proc(self: ^game) {
 		}
 	}
 
-	collision, direction, diff_vector := check_ball_collision(ball, player)
+	collision, _, _ := check_ball_collision(ball, player)
 	if (!ball.stuck && collision) {
 		center_board := player.position.x + player.size.x / 2.
 		distance := (ball.position.x + ball.radius) - center_board
@@ -309,28 +331,39 @@ init_game_level :: proc(self: ^game_level, tile_data: [][]u32, level_width, leve
 	}
 }
 
-load_game_level :: proc(self: ^game_level, file: string, level_width, level_height: u32) {
+load_game_level :: proc(self: ^game_level, file: string, level_width, level_height: u32) -> bool {
 	clear(&self.bricks)
 
-	tile_code: u32
-	level := game_level{}
-	data, ok := read_entire_file(file, context.allocator)
-	tile_data: [][]u32 = {}
-	if !ok {
-		fmt.println("err happened reading file")
-		return
+	data, err := os.read_entire_file(file, context.allocator)
+	if err != nil {
+		fmt.eprintf("[level] cannot read %q: %v\n", file, err)
+		return false
 	}
 	defer delete(data, context.allocator)
 
 	file_contents := string(data)
-	line_number := 0
 	line_row: [dynamic][]u32
-	defer delete(line_row)
+	defer {
+		for row in line_row {
+			delete(row)
+		}
+		delete(line_row)
+	}
+
+	line_number := 0
 	for line in strings.split_lines_iterator(&file_contents) {
 		l := line
 		row: [dynamic]u32
 		for elem in strings.split_iterator(&l, " ") {
-			num, _ := strconv.parse_uint(elem)
+			if elem == "" {
+				continue
+			}
+			num, parsed := strconv.parse_uint(elem)
+			if !parsed {
+				fmt.eprintf("[level] %s:%d: bad tile %q\n", file, line_number + 1, elem)
+				delete(row)
+				return false
+			}
 			append(&row, cast(u32)num)
 		}
 		row_slice := make([]u32, len(row))
@@ -339,15 +372,32 @@ load_game_level :: proc(self: ^game_level, file: string, level_width, level_heig
 		delete(row)
 		line_number += 1
 	}
-	tile_data = line_row[:]
 
-	if len(tile_data) > 0 {
-		init_game_level(self, tile_data, level_width, level_height)
+	if len(line_row) == 0 {
+		fmt.eprintf("[level] %q is empty\n", file)
+		return false
 	}
 
-	for rs in line_row {
-		delete(rs)
+	width := len(line_row[0])
+	if width == 0 {
+		fmt.eprintf("[level] %q: first row has no tiles\n", file)
+		return false
 	}
+	for row, y in line_row {
+		if len(row) != width {
+			fmt.eprintf(
+				"[level] %q: row %d has %d tiles, expected %d\n",
+				file,
+				y + 1,
+				len(row),
+				width,
+			)
+			return false
+		}
+	}
+
+	init_game_level(self, line_row[:], level_width, level_height)
+	return true
 }
 
 draw_game_level :: proc(self: game_level, renderer: ^sprite_renderer) {
@@ -560,7 +610,7 @@ init_particle_gen :: proc(self: ^particle_generator) {
 	gl.EnableVertexAttribArray(0)
 	gl.VertexAttribPointer(0, 4, gl.FLOAT, gl.FALSE, 4 * size_of(f32), 0)
 	gl.BindVertexArray(0)
-	for i in 0 ..< self.amount {
+	for _ in 0 ..< self.amount {
 		append(&self.particles, new_particle_default())
 	}
 }
@@ -573,7 +623,7 @@ update_particle_gen :: proc(
 	offset: vec2 = {0., 0.},
 ) {
 	nr_new_particles := 2
-	for i in 0 ..< nr_new_particles {
+	for _ in 0 ..< nr_new_particles {
 		unused_particle := first_unused_particle(self)
 		respawn_particles(&self.particles[unused_particle], object, offset)
 	}
@@ -732,17 +782,24 @@ load_static_font_from_bytes :: proc(
 	ok: bool,
 ) {
 	codepoints := codepoints
+
+	defer if !ok {
+		delete(font.glyphs)
+		delete(font.glyphs_ranges)
+		if font.texture.Id != 0 {
+			gl.DeleteTextures(1, &font.texture.Id)
+		}
+	}
+
 	font_info: stbtt.fontinfo
 	font_offset := stbtt.GetFontOffsetForIndex(raw_data(data), 0)
 	if font_offset < 0 {
-		fmt.println("failed loading ttf/ttc font")
+		fmt.eprintf("[font] GetFontOffsetForIndex returned %d\n", font_offset)
 		return
 	}
-	init_ok := stbtt.InitFont(&font_info, raw_data(data), font_offset)
 
-
-	if !init_ok {
-		fmt.println("failed loading ttf/ttc font")
+	if !stbtt.InitFont(&font_info, raw_data(data), font_offset) {
+		fmt.eprintf("[font] InitFont failed at offset %d\n", font_offset)
 		return
 	}
 
@@ -794,6 +851,11 @@ load_static_font_from_bytes :: proc(
 	slice.sort_by(font.glyphs[:], proc(i, j: Font_Baked_Glyph) -> bool {
 		return i.value < j.value
 	})
+
+	if len(font.glyphs) == 0 {
+		fmt.eprintf("[font] no glyphs baked from %d codepoints\n", len(codepoints))
+		return
+	}
 
 	if len(font.glyphs) > 0 {
 		cur := Font_Baked_Glyph_Range {
@@ -856,9 +918,9 @@ load_static_font_from_bytes :: proc(
 		}
 	}
 
-	atlas_size := 128
 	MAX_ATLAS_SIZE :: 4096
-	rp_nodes := make([]stbrp.Node, i32(atlas_size), context.allocator)
+	atlas_size := 128
+	rp_nodes := make([]stbrp.Node, MAX_ATLAS_SIZE, context.allocator)
 	defer delete(rp_nodes)
 	atlas_packed := false
 
@@ -886,12 +948,15 @@ load_static_font_from_bytes :: proc(
 
 
 	if !atlas_packed {
-		fmt.println("failed to pack font atlas")
+		last_size := min(atlas_size, MAX_ATLAS_SIZE)
+		fmt.eprintf(
+			"[font] atlas packing failed: %d glyphs, last try %dx%d\n",
+			len(font.glyphs),
+			last_size,
+			last_size,
+		)
 		return {}, false
 	}
-
-
-	atlas := make([]vec4, atlas_size * atlas_size, context.allocator)
 
 	// TODO: Implement this option
 	// if options.premultiply_alpha {} else {
@@ -929,6 +994,7 @@ load_static_font_from_bytes :: proc(
 				a := f32(b.pixels[int(sy) * int(b.width) + int(sx)]) / 255.0
 				dx := int(pr.x) + int(sx)
 				dy := int(pr.y) + int(sy)
+				assert(dx >= 0 && dx < atlas_size && dy >= 0 && dy < atlas_size)
 				o := (dy * atlas_size + dx) * 4
 
 				rgb := u8(255)
@@ -940,6 +1006,17 @@ load_static_font_from_bytes :: proc(
 				pixels[o + 3] = u8(a * 255.0)
 			}
 		}
+	}
+
+	alpha_px := 0
+	for i := 3; i < len(pixels); i += 4 {
+		if pixels[i] > 0 {
+			alpha_px += 1
+		}
+	}
+	if alpha_px == 0 {
+		fmt.eprintf("[font] atlas has no opaque pixels (%d glyphs)\n", len(font.glyphs))
+		return
 	}
 
 	// for g_img_data in glyphs_image_data {
@@ -955,7 +1032,10 @@ load_static_font_from_bytes :: proc(
 	}
 
 	font.texture = load_texture_from_image(img, options.filter)
-	fmt.println("loaded the file")
+	if font.texture.Id == 0 {
+		fmt.eprintf("[font] atlas texture upload failed\n")
+		return
+	}
 
 	return font, true
 }
@@ -974,27 +1054,23 @@ load_texture_from_image :: proc(image: Image, filter: Texture_Filter = .Linear) 
 
 glfw_error_callback :: proc "c" (code: i32, description: cstring) {
 	context = runtime.default_context()
-	fmt.printf("[GLFW %d] %s\n", code, description)
+	fmt.eprintf("[GLFW %d] %s\n", code, description)
 }
 
 main :: proc() {
 	glfw.SetErrorCallback(glfw_error_callback)
-	if !glfw.Init() {
-		fmt.println("[GLFW] init failed")
-		os.exit(1)
-	}
+	require(bool(glfw.Init()), "[GLFW] init failed")
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MAJOR, GL_MAJOR_V)
 	glfw.WindowHint(glfw.CONTEXT_VERSION_MINOR, GL_MINOR_V)
 	glfw.WindowHint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 	window := glfw.CreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Breakout", nil, nil)
-	if window == nil {
-		fmt.println("[OPENGL ERROR] Failed to create GLFW window")
-		glfw.Terminate()
-		os.exit(-1)
-	}
+	require(window != nil, "[GLFW] failed to create window (see error above)")
 
 	glfw.MakeContextCurrent(window)
 	gl.load_up_to(GL_MAJOR_V, GL_MINOR_V, glfw.gl_set_proc_address)
+	gl_version := string(gl.GetString(gl.VERSION))
+	require(len(gl_version) > 0, "no GL context after load_up_to")
+	fmt.printf("GL %s | %s\n", gl_version, string(gl.GetString(gl.RENDERER)))
 
 	gl.Viewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
 
@@ -1004,7 +1080,6 @@ main :: proc() {
 
 	delta_time: f32 = 0.
 	last_frame_time: f32 = 0.
-	accum_delta: f32 = 0.
 
 	for !glfw.WindowShouldClose(window) {
 
